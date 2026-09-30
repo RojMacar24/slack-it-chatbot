@@ -2,7 +2,8 @@
 
 A self-contained lab project that automates first-line IT support between Slack and Jira:
 
-- Every new post in your IT channel becomes a **Jira ticket**. The ticket is typed, categorised, prioritised and labelled.
+- New posts in your IT channel become **Jira tickets**, each typed, categorised, prioritised and labelled. A greeting
+  gets asked for details first, and quick follow-up posts join the same ticket.
 - The bot replies in the Slack thread with the ticket link and, if OpenAI is configured, **first troubleshooting steps**.
 - Replies in the thread are **copied into Jira as comments**, so the ticket holds the whole conversation.
 - The requester can press **✅ That fixed it**, which closes the Jira ticket, or **🆘 Escalate to IT**, which labels it and pings your IT group.
@@ -110,11 +111,13 @@ invited yet. Then post something like *"My VPN keeps disconnecting"* in the chan
 | `JIRA_REQUEST_ISSUE_TYPE` | | same as above | Issue type for access and change requests |
 | `JIRA_LABEL` | | `slack-it-bot` | Added to every ticket, and used by the report |
 | `JIRA_SET_PRIORITY` | | `true` | The bot retries without a priority if Jira rejects it |
+| `JIRA_DONE_TRANSITION` | | | Exact transition name for "That fixed it", if the automatic choice is wrong |
 | `OPENAI_API_KEY` | | | Turns on AI triage and replies |
 | `OPENAI_MODEL` | | `gpt-4o-mini` | Any chat model that supports JSON mode |
 | `IT_ENVIRONMENT_FILE` | | `it_environment.md` | Context for the AI |
 | `ESCALATION_MENTION` | | "The IT team" | `<@U…>` or `<!subteam^S…>` to ping on escalation |
 | `MAX_AI_FOLLOW_UPS` | | `3` | AI replies per ticket after the first answer |
+| `MERGE_WINDOW_SECONDS` | | `120` | Extra posts from the same person within this time join their last ticket. `0` turns it off |
 | `REPORT_ENABLED` / `REPORT_DAY` / `REPORT_HOUR` / `REPORT_TIMEZONE` | | `true` / `mon` / `9` / `UTC` | Weekly report schedule |
 
 ## How it works
@@ -127,9 +130,23 @@ keyword rules, and so does any API failure. Access and change requests get an ac
 `change-request`) and `category-<name>`. Escalated tickets also get `escalated`. This makes JQL filters and Jira
 automation rules easy, for example `labels = escalated AND statusCategory != Done`.
 
+**Greetings and split posts.** People rarely put a whole problem in one message:
+- A post with no details yet, like "Hi team" or "quick question", gets a reply asking what's going on. When that
+  person answers in the thread, the ticket opens there.
+- If the same person posts again within `MERGE_WINDOW_SECONDS` (2 minutes by default), the new post joins their
+  last ticket instead of opening another. It's added to Jira as a comment, the new post gets a link back to the
+  ticket thread, and the AI answers there with the new detail in mind. Replies under the extra post are copied to
+  the ticket too.
+
+**Timing.** A reply sent while its ticket is still being created waits for it instead of being dropped. Replies in the
+same thread are handled one at a time. If someone sends two messages in quick succession, the AI answers once,
+covering both.
+
 **No database.** The bot recognises its tickets from its own thread message, which starts with
 "Ticket IT-42 created". The requester is whoever started the thread. Jira is the source of truth for status and
-labels, so closing or labelling a ticket directly in Jira also stops the AI.
+labels, so closing or labelling a ticket directly in Jira also stops the AI. The only things kept in memory are
+short-lived: tickets still being created, and each person's latest ticket for the merge window. A restart forgets
+those and nothing else.
 
 **When the AI stays quiet.** It only replies to the person who opened the ticket, and only on incidents. It stops when:
 
@@ -139,8 +156,10 @@ labels, so closing or labelling a ticket directly in Jira also stops the AI.
 
 Everyone's replies are still copied to Jira.
 
-**Buttons.** Only the requester can use them. Anyone else gets a private note saying so. Closing uses the first
-transition in your workflow that leads to a Done-category status.
+**Buttons.** Only the requester can use them. Anyone else gets a private note saying so. To close a ticket, the bot
+picks a transition into a Done-category status, preferring names like Done, Resolve or Close. It never uses
+cancel-style transitions ("Cancel", "Won't do", "Duplicate"). If the transition asks for a resolution, it fills in
+Done or Fixed. Set `JIRA_DONE_TRANSITION` to override the choice.
 
 ## Tests
 
@@ -166,7 +185,7 @@ variables there instead of using a `.env` file.
 | `Couldn't reach Jira project` at startup | Wrong URL, email or token, or the account can't see the project |
 | `issuetype: … invalid` | `JIRA_ISSUE_TYPE` doesn't exist in the project. Check the names under *Project settings*, then *Issue types* |
 | `labels` error when creating | The Labels field isn't on the project's create screen |
-| "couldn't find a way to close" | The workflow has no transition to a Done status from the current one |
+| "couldn't find a way to close" | The workflow has no non-cancel transition to a Done status from the current one. Set `JIRA_DONE_TRANSITION` to the transition's exact name |
 | Buttons do nothing | Interactivity is off in the Slack app settings (the manifest turns it on) |
 | Private channel not found | Use the channel ID in `IT_CHANNEL`, add `groups:history` and `groups:read`, and subscribe to `message.groups` |
 

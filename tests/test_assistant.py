@@ -3,7 +3,23 @@ from types import SimpleNamespace
 
 import pytest
 
-from assistant import Assistant, Triage, keyword_triage
+from assistant import Assistant, Triage, is_small_talk, keyword_triage
+
+
+@pytest.mark.parametrize("text", [
+    "Hi team", "hello :wave:", "Good morning all!", "quick question", "I need help", "Is anyone around?", "👋",
+    "hey, can someone help please",
+])
+def test_small_talk(text):
+    assert is_small_talk(text)
+
+
+@pytest.mark.parametrize("text", [
+    "Hi, my VPN is down", "help, laptop won't boot", "Need access to Jira",
+    "hi team, the printer on floor 3 is jammed again",
+])
+def test_not_small_talk(text):
+    assert not is_small_talk(text)
 
 
 @pytest.mark.parametrize("text, kind, category", [

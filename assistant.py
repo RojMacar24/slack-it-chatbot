@@ -86,6 +86,21 @@ def keyword_triage(text):
     return Triage(kind, category, priority, _summary_from(text))
 
 
+_SMALL_TALK_WORDS = {
+    "hi", "hello", "hey", "hiya", "yo", "howdy", "good", "morning", "afternoon", "evening", "gm",
+    "team", "all", "everyone", "anyone", "folks", "guys", "y'all", "there", "it", "support", "helpdesk",
+    "quick", "question", "i", "have", "got", "a", "need", "some", "help", "please", "pls", "can", "you",
+    "someone", "around", "here", "is", "are",
+}
+
+
+def is_small_talk(text):
+    """True for posts with no details yet, like "Hi team", "quick question" or "I need help"."""
+    text = re.sub(r":[a-z0-9_+'-]+:", " ", text.lower())  # Slack emoji codes such as :wave:
+    words = re.findall(r"[a-z']+", text)
+    return len(words) <= 6 and all(word in _SMALL_TALK_WORDS for word in words)
+
+
 def _summary_from(text):
     first_line = next((line for line in text.splitlines() if line.strip()), "")
     return _clean_summary(first_line) or "IT request from Slack"

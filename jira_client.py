@@ -5,10 +5,15 @@ which Atlassian moved to /rest/api/3/search/jql.
 """
 
 import logging
+import re
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+# How a "Done" transition or resolution is named decides whether it means "fixed" or "abandoned".
+_CANCEL_WORDS = re.compile(r"cancel|won'?t|reject|declin|duplicate|obsolete|abandon", re.IGNORECASE)
+_RESOLVED_WORDS = re.compile(r"done|resolv|close|complet|fix", re.IGNORECASE)
 
 
 class JiraError(Exception):
@@ -72,16 +77,22 @@ class JiraClient:
     def add_labels(self, key, labels):
         self._request("PUT", f"/rest/api/2/issue/{key}", json={"update": {"labels": [{"add": label} for label in labels]}})
 
-    def transition_to_done(self, key):
-        """Move the issue to a status in Jira's "Done" category.
+    def transition_to_done(self, key, preferred_name=None):
+        """Resolve the issue: move it to a Done-category status that means fixed, not cancelled.
 
-        Returns False if the workflow offers no such transition from the current status (for example, it's already done).
+        Returns False if the workflow offers no suitable transition from the current status (for example, it's
+        already done, or the only way to Done is "Cancel").
         """
-        transitions = self._request("GET", f"/rest/api/2/issue/{key}/transitions")["transitions"]
-        done = [t for t in transitions if t.get("to", {}).get("statusCategory", {}).get("key") == "done"]
-        if not done:
+        transitions = self._request("GET", f"/rest/api/2/issue/{key}/transitions",
+                                    params={"expand": "transitions.fields"})["transitions"]
+        choice = pick_done_transition(transitions, preferred_name)
+        if choice is None:
             return False
-        self._request("POST", f"/rest/api/2/issue/{key}/transitions", json={"transition": {"id": done[0]["id"]}})
+        payload = {"transition": {"id": choice["id"]}}
+        resolution = (choice.get("fields") or {}).get("resolution")
+        if resolution and resolution.get("required"):
+            payload["fields"] = {"resolution": {"name": pick_resolution(resolution.get("allowedValues") or [])}}
+        self._request("POST", f"/rest/api/2/issue/{key}/transitions", json=payload)
         return True
 
     def search(self, jql, fields, max_issues=1000):
@@ -126,6 +137,32 @@ def _error_text(response):
     messages = list(body.get("errorMessages") or [])
     messages += [f"{field}: {message}" for field, message in (body.get("errors") or {}).items()]
     return "; ".join(messages) or response.text[:300]
+
+
+def pick_done_transition(transitions, preferred_name=None):
+    """Choose the transition that resolves an issue.
+
+    `preferred_name` (JIRA_DONE_TRANSITION) wins if the workflow has it. Otherwise: only transitions into a
+    Done-category status, never cancel-style ones, preferring names like Done/Resolve/Close.
+    """
+    if preferred_name:
+        return next((t for t in transitions if t.get("name", "").lower() == preferred_name.lower()), None)
+
+    def described(t):
+        return f"{t.get('name', '')} {(t.get('to') or {}).get('name', '')}"
+
+    usable = [
+        t for t in transitions
+        if (t.get("to") or {}).get("statusCategory", {}).get("key") == "done" and not _CANCEL_WORDS.search(described(t))
+    ]
+    return next((t for t in usable if _RESOLVED_WORDS.search(described(t))), usable[0] if usable else None)
+
+
+def pick_resolution(allowed_values):
+    """Choose a resolution such as Done or Fixed when a transition requires one."""
+    names = [v.get("name", "") for v in allowed_values if v.get("name")]
+    usable = [name for name in names if not _CANCEL_WORDS.search(name)]
+    return next((name for name in usable if _RESOLVED_WORDS.search(name)), (usable or names or ["Done"])[0])
 
 
 def is_done(fields):

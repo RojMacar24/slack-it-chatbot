@@ -1,4 +1,6 @@
 import json
+import threading
+import time
 
 import pytest
 from slack_bolt import App
@@ -44,12 +46,14 @@ def post(desk, slack, text, user=REQUESTER, **extra):
     return ts
 
 
-def reply(desk, slack, thread_ts, text, user=REQUESTER):
+def reply(desk, slack, thread_ts, text, user=REQUESTER, dispatch=True):
+    """A reply in a thread. With dispatch=False it's only added to the thread, as if its event hadn't arrived yet."""
     ts = slack.next_ts()
     event = {"type": "message", "channel": CHANNEL_ID, "user": user, "text": text, "ts": ts, "thread_ts": thread_ts}
     slack.threads[thread_ts].append(dict(event))
-    desk.on_message(event)
-    return ts
+    if dispatch:
+        desk.on_message(event)
+    return event
 
 
 def click(desk, slack, thread_ts, action_id, user=REQUESTER):
@@ -207,6 +211,126 @@ def test_without_ai_the_bot_still_opens_tickets_and_mirrors_replies(slack, jira)
     assert jira.created[0]["labels"][2] == "category-hardware"
     assert jira.comments == [("IT-1", "UREQ replied in Slack:\n{noformat}\nTried a restart\n{noformat}")]
     assert len(slack.calls_to("chat_postMessage")) == 1  # just the ticket message
+
+
+# --- Greetings, split posts and timing -------------------------------------------------------------------------
+
+def test_greeting_asks_for_details_and_the_answer_opens_the_ticket_there(desk, slack, jira, ai):
+    ts = post(desk, slack, "Hi team :wave:")
+    assert jira.created == []
+    assert last_post(slack)["text"].startswith(f"Hi <@{REQUESTER}>! What's going on?")
+
+    details = reply(desk, slack, ts, "My VPN keeps disconnecting")
+    [issue] = jira.created
+    assert issue["summary"] == "My VPN keeps disconnecting"
+    assert "p" + details["ts"].replace(".", "") in issue["description"]  # permalink points at the details
+    assert last_post(slack)["thread_ts"] == ts and last_post(slack)["text"].startswith("Ticket IT-1 created")
+
+    reply(desk, slack, ts, "Restarted, still failing")
+    assert len(ai.histories) == 1  # the greeting prompt doesn't count towards the AI reply limit
+
+
+def test_only_the_person_who_said_hi_can_open_a_ticket_from_the_greeting(desk, slack, jira):
+    ts = post(desk, slack, "Hello, anyone around?")
+    reply(desk, slack, ts, "What's up?", user=ENGINEER)
+    assert jira.created == []
+
+
+def test_split_posts_go_into_one_ticket(desk, slack, jira, ai):
+    first = post(desk, slack, "My VPN keeps disconnecting")
+    second = post(desk, slack, "It shows error 809")
+
+    assert len(jira.created) == 1
+    assert ("IT-1", "UREQ added in a separate Slack post:\n{noformat}\nIt shows error 809\n{noformat}") in jira.comments
+    pointer = next(call for call in slack.calls_to("chat_postMessage") if call["thread_ts"] == second)
+    assert pointer["text"].startswith(f"Added to ticket IT-1: <https://slack.example/archives/{CHANNEL_ID}/p")
+    assert last_post(slack)["thread_ts"] == first  # the AI answers in the ticket thread...
+    assert ai.histories[-1][-1] == {"role": "user", "content": "It shows error 809"}  # ...with the new detail
+
+
+def test_posts_outside_the_window_or_from_others_open_their_own_tickets(desk, slack, jira):
+    post(desk, slack, "My VPN keeps disconnecting")
+    post(desk, slack, "Printer is jammed", user=ENGINEER)
+    slack._clock += 121
+    post(desk, slack, "Now Outlook won't open")
+    assert [issue["summary"] for issue in jira.created] == [
+        "My VPN keeps disconnecting", "Printer is jammed", "Now Outlook won't open"]
+
+
+def test_a_post_after_resolving_opens_a_new_ticket(desk, slack, jira):
+    ts = post(desk, slack, "My VPN keeps disconnecting")
+    click(desk, slack, ts, tickets.RESOLVE_ACTION)
+    post(desk, slack, "Different thing: the printer is jammed")
+    assert len(jira.created) == 2
+
+
+def test_merging_can_be_turned_off(slack, jira, ai):
+    desk = HelpDesk(make_config(MERGE_WINDOW_SECONDS="0"), slack, jira, ai, BOT_USER_ID, CHANNEL_ID)
+    post(desk, slack, "My VPN keeps disconnecting")
+    post(desk, slack, "It shows error 809")
+    assert len(jira.created) == 2
+
+
+def test_replies_under_a_merged_post_are_copied_to_the_ticket(desk, slack, jira, ai):
+    post(desk, slack, "My VPN keeps disconnecting")
+    second = post(desk, slack, "It shows error 809")
+    answers_before = len(ai.histories)
+    reply(desk, slack, second, "Only on Wi-Fi")
+    assert ("IT-1", "UREQ replied in Slack:\n{noformat}\nOnly on Wi-Fi\n{noformat}") in jira.comments
+    assert len(ai.histories) == answers_before  # the conversation stays in the ticket thread
+
+
+def test_reply_sent_while_the_ticket_is_being_created_is_not_lost(slack, jira):
+    release = threading.Event()
+
+    class SlowAssistant(FakeAssistant):
+        def assess(self, text):
+            assert release.wait(5)
+            return super().assess(text)
+
+    ai = SlowAssistant()
+    desk = HelpDesk(make_config(), slack, jira, ai, BOT_USER_ID, CHANNEL_ID)
+    ts = slack.next_ts()
+    top = {"type": "message", "channel": CHANNEL_ID, "user": REQUESTER, "text": "VPN won't connect", "ts": ts}
+    slack.threads[ts] = [dict(top)]
+    opener = threading.Thread(target=desk.on_message, args=(top,))
+    opener.start()
+    deadline = time.monotonic() + 5
+    while ts not in desk._opening and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    early = reply(desk, slack, ts, "It started after the update", dispatch=False)
+    replier = threading.Thread(target=desk.on_message, args=(early,))
+    replier.start()
+    time.sleep(0.2)
+    assert jira.created == [] and jira.comments == []  # the reply is waiting for the ticket
+    release.set()
+    opener.join(5)
+    replier.join(5)
+
+    assert not opener.is_alive() and not replier.is_alive()
+    assert ("IT-1", "UREQ replied in Slack:\n{noformat}\nIt started after the update\n{noformat}") in jira.comments
+    assert len(ai.histories) == 1
+
+
+def test_quick_replies_get_one_answer_covering_both(desk, slack, jira, ai):
+    ts = post(desk, slack, "VPN won't connect")
+    first = reply(desk, slack, ts, "Restarted, still failing", dispatch=False)
+    second = reply(desk, slack, ts, "Also tried another network", dispatch=False)
+    desk.on_message(first)
+    desk.on_message(second)
+
+    assert len(ai.histories) == 1
+    said = [m["content"] for m in ai.histories[0] if m["role"] == "user"]
+    assert said[-2:] == ["Restarted, still failing", "Also tried another network"]
+    assert [body.split(":")[0] for key, body in jira.comments].count("UREQ replied in Slack") == 2
+
+
+def test_resolve_passes_the_configured_transition_name(slack, jira, ai):
+    desk = HelpDesk(make_config(JIRA_DONE_TRANSITION="Resolve this issue"), slack, jira, ai, BOT_USER_ID, CHANNEL_ID)
+    ts = post(desk, slack, "VPN won't connect")
+    click(desk, slack, ts, tickets.RESOLVE_ACTION)
+    assert jira.preferred_transition == "Resolve this issue"
 
 
 # --- Buttons ---------------------------------------------------------------------------------------------------

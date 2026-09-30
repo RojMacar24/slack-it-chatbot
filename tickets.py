@@ -18,6 +18,8 @@ ESCALATED_LABEL = "escalated"
 CATEGORY_LABEL_PREFIX = "category-"
 
 _TICKET_TEXT = re.compile(r"Ticket ([A-Z][A-Z0-9_]*-\d+) created")
+_LINKED_TEXT = re.compile(r"Added to ticket ([A-Z][A-Z0-9_]*-\d+)")
+_DETAILS_PROMPT = re.compile(r"Hi <@\w+>! What's going on\?")
 _SECTION_LIMIT = 2900  # Slack allows 3,000 characters in a section block
 
 
@@ -96,6 +98,39 @@ def find_ticket(messages, bot_user_id):
     return None
 
 
+def details_prompt_text(user_id):
+    """The bot's reply to a post with no details yet ("Hi team"). Keep the opening words: awaiting_details() needs them."""
+    return f"Hi <@{user_id}>! What's going on? Reply here with the details and I'll open a ticket."
+
+
+def awaiting_details(messages, bot_user_id, author):
+    """True if `author` started this thread and the bot asked them for details there."""
+    return bool(messages) and messages[0].get("user") == author and any(
+        message.get("user") == bot_user_id and _DETAILS_PROMPT.match(message.get("text", ""))
+        for message in messages[1:]
+    )
+
+
+def linked_text(key, thread_permalink):
+    """The bot's reply to an extra post that was added to an existing ticket. find_linked_ticket() reads it."""
+    return f"Added to ticket {key}: <{thread_permalink}|continue in the ticket thread>"
+
+
+def find_linked_ticket(messages, bot_user_id):
+    """The ticket key if this thread is an extra post the bot added to a ticket opened elsewhere."""
+    for message in messages[1:]:
+        if message.get("user") == bot_user_id:
+            match = _LINKED_TEXT.match(message.get("text", ""))
+            if match:
+                return match.group(1)
+    return None
+
+
+def has_later_message_from(messages, user_id, ts):
+    """True if `user_id` posted in the thread after message `ts`, so answering `ts` alone would be out of date."""
+    return any(message.get("user") == user_id and float(message.get("ts", 0)) > float(ts) for message in messages)
+
+
 def human_took_over(messages, creator, bot_user_id):
     """True once anyone other than the requester and this bot has replied, e.g. someone from IT."""
     return any(
@@ -105,11 +140,16 @@ def human_took_over(messages, creator, bot_user_id):
 
 
 def ai_reply_count(messages, bot_user_id):
-    """How many messages the bot has posted in the thread after the ticket message."""
-    return sum(
-        1 for message in messages[1:]
-        if message.get("user") == bot_user_id and not _TICKET_TEXT.match(message.get("text", ""))
-    )
+    """How many messages the bot has posted in the thread after its ticket message."""
+    count, after_ticket = 0, False
+    for message in messages[1:]:
+        if message.get("user") != bot_user_id:
+            continue
+        if _TICKET_TEXT.match(message.get("text", "")):
+            after_ticket = True
+        elif after_ticket:
+            count += 1
+    return count
 
 
 def conversation_history(messages, creator, bot_user_id, clean):

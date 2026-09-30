@@ -26,11 +26,13 @@ class Config:
     jira_request_issue_type: str
     jira_label: str
     jira_set_priority: bool
+    jira_done_transition: str | None
     openai_api_key: str | None
     openai_model: str
     it_environment: str
     escalation_mention: str | None
     max_ai_follow_ups: int
+    merge_window_seconds: int
     report_enabled: bool
     report_day: str
     report_hour: int
@@ -90,11 +92,13 @@ def load_config(env=None) -> Config:
         jira_request_issue_type=get("JIRA_REQUEST_ISSUE_TYPE", issue_type),
         jira_label=label,
         jira_set_priority=flag("JIRA_SET_PRIORITY", True),
+        jira_done_transition=get("JIRA_DONE_TRANSITION"),
         openai_api_key=get("OPENAI_API_KEY"),
         openai_model=get("OPENAI_MODEL", "gpt-4o-mini"),
         it_environment=_read_environment_notes(get("IT_ENVIRONMENT_FILE", "it_environment.md")),
         escalation_mention=get("ESCALATION_MENTION"),
         max_ai_follow_ups=number("MAX_AI_FOLLOW_UPS", 3),
+        merge_window_seconds=number("MERGE_WINDOW_SECONDS", 120),
         report_enabled=flag("REPORT_ENABLED", True),
         report_day=get("REPORT_DAY", "mon"),
         report_hour=number("REPORT_HOUR", 9),

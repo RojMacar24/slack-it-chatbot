@@ -4,7 +4,7 @@ import json
 import pytest
 import requests
 
-from jira_client import JiraClient, JiraError, is_done, noformat
+from jira_client import JiraClient, JiraError, is_done, noformat, pick_done_transition, pick_resolution
 
 
 class FakeResponse:
@@ -92,7 +92,54 @@ def test_transition_to_done_picks_a_done_category_transition():
         ("POST", "/rest/api/2/issue/IT-1/transitions", FakeResponse(204)),
     )
     assert jira.transition_to_done("IT-1") is True
+    assert session.requests[0][2]["params"] == {"expand": "transitions.fields"}
     assert session.requests[1][2]["json"] == {"transition": {"id": "31"}}
+
+
+def done_transition(id_, name, status, resolution_values=None):
+    transition = {"id": id_, "name": name, "to": {"name": status, "statusCategory": {"key": "done"}}}
+    if resolution_values is not None:
+        transition["fields"] = {"resolution": {"required": True, "allowedValues": [{"name": v} for v in resolution_values]}}
+    return transition
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_resolve_style_transitions_beat_cancel_in_any_order(reverse):
+    transitions = [done_transition("21", "Cancel request", "Canceled"), done_transition("31", "Resolve this issue", "Resolved")]
+    if reverse:
+        transitions.reverse()
+    assert pick_done_transition(transitions)["id"] == "31"
+
+
+def test_only_cancel_style_transitions_means_no_choice():
+    transitions = [done_transition("21", "Cancel request", "Canceled"), done_transition("22", "Mark duplicate", "Closed")]
+    assert pick_done_transition(transitions) is None
+
+
+def test_configured_transition_name_wins():
+    transitions = [done_transition("31", "Resolve", "Resolved"), done_transition("41", "Ship it", "Released")]
+    assert pick_done_transition(transitions, "ship IT")["id"] == "41"
+    assert pick_done_transition(transitions, "Missing") is None
+
+
+@pytest.mark.parametrize("values, expected", [
+    (["Won't Do", "Fixed", "Duplicate"], "Fixed"),
+    (["Declined", "Done"], "Done"),
+    (["Works as designed"], "Works as designed"),
+    ([], "Done"),
+])
+def test_pick_resolution(values, expected):
+    assert pick_resolution([{"name": v} for v in values]) == expected
+
+
+def test_transition_to_done_fills_a_required_resolution():
+    transitions = {"transitions": [done_transition("31", "Resolve this issue", "Resolved", ["Won't Do", "Done"])]}
+    jira, session = client(
+        ("GET", "/rest/api/2/issue/IT-1/transitions", FakeResponse(200, transitions)),
+        ("POST", "/rest/api/2/issue/IT-1/transitions", FakeResponse(204)),
+    )
+    assert jira.transition_to_done("IT-1") is True
+    assert session.requests[1][2]["json"] == {"transition": {"id": "31"}, "fields": {"resolution": {"name": "Done"}}}
 
 
 def test_transition_to_done_returns_false_without_a_done_transition():

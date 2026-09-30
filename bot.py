@@ -1,8 +1,9 @@
 """Slack + Jira IT help desk bot.
 
-Every new post in the IT channel becomes a Jira ticket. The bot replies in the thread with the ticket link and,
-if OpenAI is configured, first troubleshooting steps. It keeps helping the requester in the thread, copies the
-thread into Jira as comments, and lets the requester close or escalate the ticket with buttons.
+New posts in the IT channel become Jira tickets. Greetings get asked for details first, and quick extra posts from
+the same person join their last ticket. The bot replies in the thread with the ticket link and, if OpenAI is
+configured, first troubleshooting steps. It keeps helping the requester in the thread, copies the thread into Jira
+as comments, and lets the requester close or escalate the ticket with buttons.
 """
 
 import logging
@@ -18,7 +19,7 @@ from slack_sdk.errors import SlackApiError
 
 import reports
 import tickets
-from assistant import Assistant
+from assistant import Assistant, is_small_talk
 from config import ConfigError, load_config
 from jira_client import JiraClient, JiraError, is_done, noformat
 from text_utils import redact_secrets, slack_to_plain, to_slack_mrkdwn
@@ -53,6 +54,17 @@ class RecentKeys:
             return True
 
 
+class KeyedLocks:
+    """A fixed pool of locks picked by key, so work on the same Slack thread (or user) runs one at a time without
+    keeping a lock per key forever. Unrelated keys occasionally share a lock, which only costs a short wait."""
+
+    def __init__(self, size=64):
+        self._locks = [threading.Lock() for _ in range(size)]
+
+    def __call__(self, key):
+        return self._locks[hash(key) % len(self._locks)]
+
+
 class HelpDesk:
     def __init__(self, config, slack, jira, assistant, bot_user_id, channel_id):
         self.config = config
@@ -63,6 +75,12 @@ class HelpDesk:
         self.channel_id = channel_id
         self._seen = RecentKeys()
         self.user_name = lru_cache(maxsize=1024)(self._lookup_user_name)
+        # Locking order is always user lock, then thread lock.
+        self._user_locks = KeyedLocks()
+        self._thread_locks = KeyedLocks()
+        self._state_lock = threading.Lock()
+        self._opening = {}  # thread ts -> Event, for top-level posts still being turned into tickets
+        self._recent_tickets = {}  # user ID -> (TicketRef, ts of their latest post on it), for merging split posts
 
     def register(self, app):
         @app.event("message")
@@ -98,7 +116,7 @@ class HelpDesk:
         if thread_ts and thread_ts != event["ts"]:
             self.on_thread_reply(event)
         else:
-            self.open_ticket(event)
+            self.on_top_level_post(event)
 
     def on_mention(self, event):
         channel = event["channel"]
@@ -143,13 +161,79 @@ class HelpDesk:
 
     # --- Ticket lifecycle --------------------------------------------------------------------------------------
 
-    def open_ticket(self, event):
-        channel, ts, requester = event["channel"], event["ts"], event["user"]
+    def on_top_level_post(self, event):
+        ts, user = event["ts"], event["user"]
+        opened = threading.Event()
+        with self._state_lock:
+            self._opening[ts] = opened  # replies in this thread wait for it (see on_thread_reply)
+        try:
+            with self._user_locks(user):
+                recent = self._recent_ticket(user, ts)
+                if recent:
+                    self._add_post_to_ticket(recent, event)
+                    return
+                with self._thread_locks(ts):
+                    ticket = self._handle_new_post(event)
+                if ticket:
+                    self._remember(user, ticket, ts)
+        finally:
+            with self._state_lock:
+                self._opening.pop(ts, None)
+            opened.set()
+
+    def _handle_new_post(self, event):
+        """Open a ticket for a new post, or ask for details if it's only a greeting. Returns the TicketRef or None."""
+        channel, ts, user = event["channel"], event["ts"], event["user"]
+        files = event.get("files") or []
         plain = slack_to_plain(event.get("text", ""), self.user_name)
-        text = redact_secrets(plain)
+        if plain and not files and is_small_talk(plain):
+            self.slack.chat_postMessage(channel=channel, thread_ts=ts, text=tickets.details_prompt_text(user))
+            return None
+        return self._create_ticket(channel, ts, user, event.get("text", ""), files, ts)
+
+    def _add_post_to_ticket(self, ticket, event):
+        """A post moments after the same person's last ticket is probably more of the same story, so add it there."""
+        channel, ts, user = event["channel"], event["ts"], event["user"]
+        text = self._clean(event.get("text", ""))
         files = event.get("files") or []
         if not text and not files:
             return
+        self._remember(user, ticket, ts)
+        self._comment(ticket.key, f"{self.user_name(user)} added in a separate Slack post:\n"
+                      + noformat(text or f"(No text. Attachments in Slack: {len(files)})"))
+        thread_link = self._permalink(channel, ticket.thread_ts) or self.jira.browse_url(ticket.key)
+        self.slack.chat_postMessage(channel=channel, thread_ts=ts, text=tickets.linked_text(ticket.key, thread_link),
+                                    unfurl_links=False, unfurl_media=False)
+        if text:
+            with self._thread_locks(ticket.thread_ts):
+                messages = self.slack.conversations_replies(channel=channel, ts=ticket.thread_ts, limit=200)["messages"]
+                self._ai_follow_up(channel, ticket, messages, text, ts)
+
+    def _recent_ticket(self, user, ts):
+        """The user's ticket from moments ago, if a new post at `ts` falls inside the merge window."""
+        if self.config.merge_window_seconds <= 0:
+            return None
+        with self._state_lock:
+            ticket, last_ts = self._recent_tickets.get(user, (None, 0.0))
+        return ticket if ticket and float(ts) - last_ts <= self.config.merge_window_seconds else None
+
+    def _remember(self, user, ticket, ts):
+        with self._state_lock:
+            self._recent_tickets[user] = (ticket, float(ts))
+
+    def _forget(self, ticket):
+        """A closed ticket shouldn't soak up the requester's next post, which is probably a new problem."""
+        with self._state_lock:
+            recent, _ = self._recent_tickets.get(ticket.creator, (None, 0.0))
+            if recent and recent.key == ticket.key:
+                del self._recent_tickets[ticket.creator]
+
+    def _create_ticket(self, channel, thread_ts, requester, raw_text, files, source_ts):
+        """Create the Jira ticket and post it in `thread_ts`. `source_ts` is the message with the details."""
+        plain = slack_to_plain(raw_text, self.user_name)
+        text = redact_secrets(plain)
+        if not text and not files:
+            return None
         text = text or "(No text. See the attachments in Slack.)"
 
         triage, ai_reply = self.assistant.assess(text)
@@ -158,26 +242,26 @@ class HelpDesk:
                 project_key=self.config.jira_project_key,
                 issue_type=self.config.jira_issue_type if triage.kind == "incident" else self.config.jira_request_issue_type,
                 summary=triage.summary,
-                description=self._description(requester, channel, ts, text, len(files)),
+                description=self._description(requester, channel, source_ts, text, len(files)),
                 labels=tickets.ticket_labels(self.config.jira_label, triage),
                 priority=triage.priority if self.config.jira_set_priority else None,
             )
         except JiraError as exc:
-            logger.error("Couldn't create a Jira ticket for message %s: %s", ts, exc)
+            logger.error("Couldn't create a Jira ticket for message %s: %s", source_ts, exc)
             who = self.config.escalation_mention or "The IT team"
             self.slack.chat_postMessage(
                 channel=channel,
-                thread_ts=ts,
+                thread_ts=thread_ts,
                 text=f":warning: I couldn't create a Jira ticket for this. {who} will need to pick it up manually.",
             )
-            return
+            return None
 
         logger.info("Opened %s (%s, %s) for %s", key, triage.kind, triage.category, requester)
-        ticket = tickets.TicketRef(key=key, creator=requester, thread_ts=ts)
+        ticket = tickets.TicketRef(key=key, creator=requester, thread_ts=thread_ts)
         reply = to_slack_mrkdwn(ai_reply) if ai_reply else ""
         self.slack.chat_postMessage(
             channel=channel,
-            thread_ts=ts,
+            thread_ts=thread_ts,
             text=tickets.ticket_text(ticket, triage, reply),
             blocks=tickets.ticket_blocks(ticket, self.jira.browse_url(key), triage, reply, secret_removed=text != plain),
             unfurl_links=False,
@@ -185,22 +269,57 @@ class HelpDesk:
         )
         if ai_reply:
             self._comment(key, "AI assistant replied in Slack:\n" + noformat(ai_reply))
+        return ticket
 
     def on_thread_reply(self, event):
         channel, thread_ts, author = event["channel"], event["thread_ts"], event["user"]
-        messages = self.slack.conversations_replies(channel=channel, ts=thread_ts, limit=200)["messages"]
-        ticket = tickets.find_ticket(messages, self.bot_user_id)
-        if ticket is None:
-            return  # not a thread this bot opened a ticket in
+        self._wait_until_opened(thread_ts)
+        with self._thread_locks(thread_ts):
+            messages = self.slack.conversations_replies(channel=channel, ts=thread_ts, limit=200)["messages"]
+            ticket = tickets.find_ticket(messages, self.bot_user_id)
+            if ticket is None:
+                self._reply_without_ticket(event, messages)
+                return
+            text = self._clean(event.get("text", ""))
+            if text:
+                self._comment(ticket.key, f"{self.user_name(author)} replied in Slack:\n" + noformat(text))
+            if author == ticket.creator:
+                self._ai_follow_up(channel, ticket, messages, text, event["ts"])
 
+    def _wait_until_opened(self, thread_ts):
+        """If the thread's first post is still becoming a ticket, wait for it so this reply isn't missed."""
+        with self._state_lock:
+            opened = self._opening.get(thread_ts)
+        if opened and not opened.wait(timeout=30):
+            logger.warning("Gave up waiting for the ticket in thread %s", thread_ts)
+
+    def _reply_without_ticket(self, event, messages):
+        """Details sent after the bot asked for them open the ticket. Replies under a post that was added to a
+        ticket elsewhere are copied to that ticket. Anything else isn't the bot's business."""
+        channel, thread_ts, author = event["channel"], event["thread_ts"], event["user"]
+        if tickets.awaiting_details(messages, self.bot_user_id, author):
+            ticket = self._create_ticket(channel, thread_ts, author, event.get("text", ""),
+                                         event.get("files") or [], event["ts"])
+            if ticket:
+                self._remember(author, ticket, event["ts"])
+            return
+        key = tickets.find_linked_ticket(messages, self.bot_user_id)
         text = self._clean(event.get("text", ""))
-        if text:
-            self._comment(ticket.key, f"{self.user_name(author)} replied in Slack:\n" + noformat(text))
+        if key and text:
+            self._comment(key, f"{self.user_name(author)} replied in Slack:\n" + noformat(text))
 
-        if author != ticket.creator or not self.assistant.enabled:
+    def _ai_follow_up(self, channel, ticket, messages, new_text, new_ts):
+        """Post the AI's next reply in the ticket thread, unless it should stay out of the way.
+
+        `messages` is the ticket thread; `new_text`/`new_ts` is the requester's latest message, which may be in it
+        or (for a merged extra post) elsewhere.
+        """
+        if not self.assistant.enabled or not new_text:
             return
         if tickets.human_took_over(messages, ticket.creator, self.bot_user_id):
             return  # someone from IT has joined, so the AI stays out of the way
+        if tickets.has_later_message_from(messages, ticket.creator, new_ts):
+            return  # they've already said more, and answering that message covers this one too
         try:
             fields = self.jira.get_issue(ticket.key)
         except JiraError as exc:
@@ -218,8 +337,8 @@ class HelpDesk:
             return
 
         history = tickets.conversation_history(messages, ticket.creator, self.bot_user_id, self._clean)
-        if text and not any(m.get("ts") == event["ts"] for m in messages):
-            history.append({"role": "user", "content": text})  # Slack hadn't indexed the new reply yet
+        if not any(m.get("ts") == new_ts for m in messages):
+            history.append({"role": "user", "content": new_text})  # a merged extra post, or not indexed by Slack yet
         try:
             answer = self.assistant.follow_up(ticket.key, history)
         except Exception:
@@ -233,8 +352,11 @@ class HelpDesk:
         """Close the ticket in Jira. Returns (thread announcement, None) or (None, reason it wasn't changed)."""
         if is_done(self.jira.get_issue(ticket.key)):
             return None, f"{ticket.key} is already closed."
-        if not self.jira.transition_to_done(ticket.key):
+        if not self.jira.transition_to_done(ticket.key, self.config.jira_done_transition):
+            logger.warning("No suitable Done transition for %s. Set JIRA_DONE_TRANSITION to the exact name of the "
+                           "workflow transition that resolves tickets.", ticket.key)
             return None, f"I couldn't find a way to close {ticket.key} in its Jira workflow. IT staff can close it in Jira."
+        self._forget(ticket)
         self._comment(ticket.key, f"{self.user_name(user)} marked this resolved from Slack.")
         return f":white_check_mark: <{self.jira.browse_url(ticket.key)}|{ticket.key}> is closed. Glad it's sorted!", None
 

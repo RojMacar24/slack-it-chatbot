@@ -96,7 +96,8 @@ class FakeJira:
     def add_labels(self, key, labels):
         self.issues[key]["labels"] += labels
 
-    def transition_to_done(self, key):
+    def transition_to_done(self, key, preferred_name=None):
+        self.preferred_transition = preferred_name
         if not self.can_transition:
             return False
         self.issues[key]["status"] = {"statusCategory": {"key": "done"}}

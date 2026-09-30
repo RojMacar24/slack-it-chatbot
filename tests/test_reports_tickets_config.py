@@ -64,6 +64,25 @@ def test_thread_helpers():
     ]
 
 
+def test_greeting_and_merge_helpers():
+    parent = {"ts": "1.0", "user": "UREQ", "text": "hi team"}
+    prompt = {"ts": "1.1", "user": BOT_USER_ID, "bot_id": "B", "text": tickets.details_prompt_text("UREQ")}
+    details = {"ts": "1.2", "user": "UREQ", "text": "VPN is down"}
+    ticket = {"ts": "1.3", "user": BOT_USER_ID, "bot_id": "B", "text": "Ticket IT-1 created: VPN is down"}
+    follow_up = {"ts": "1.4", "user": BOT_USER_ID, "bot_id": "B", "text": "Try this"}
+
+    assert tickets.awaiting_details([parent, prompt], BOT_USER_ID, "UREQ")
+    assert not tickets.awaiting_details([parent, prompt], BOT_USER_ID, "UOTHER")
+    assert not tickets.awaiting_details([parent], BOT_USER_ID, "UREQ")
+    assert tickets.ai_reply_count([parent, prompt, details, ticket, follow_up], BOT_USER_ID) == 1
+    assert tickets.has_later_message_from([parent, prompt, details], "UREQ", "1.0")
+    assert not tickets.has_later_message_from([parent, prompt, details], "UREQ", "1.2")
+
+    pointer = {"ts": "2.1", "user": BOT_USER_ID, "text": tickets.linked_text("IT-7", "https://slack.example/p1")}
+    assert tickets.find_linked_ticket([{"ts": "2.0", "user": "UREQ"}, pointer], BOT_USER_ID) == "IT-7"
+    assert tickets.find_ticket([{"ts": "2.0", "user": "UREQ"}, pointer], BOT_USER_ID) is None
+
+
 def test_ticket_message_escapes_the_summary():
     ref = tickets.TicketRef("IT-1", "UREQ", "1.0")
     triage = Triage("incident", "other", "Medium", "<!channel> & stuff")
@@ -78,6 +97,8 @@ def test_config_defaults_and_environment_notes():
     assert config.jira_request_issue_type == "Task"
     assert config.openai_api_key is None
     assert config.max_ai_follow_ups == 3
+    assert config.merge_window_seconds == 120
+    assert config.jira_done_transition is None
     assert "IT environment notes" in config.it_environment
 
 
