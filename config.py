@@ -3,10 +3,12 @@
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
 PROJECT_DIR = Path(__file__).resolve().parent
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 class ConfigError(Exception):
@@ -29,6 +31,7 @@ class Config:
     jira_done_transition: str | None
     openai_api_key: str | None
     openai_model: str
+    ai_allowed_link_domains: tuple[str, ...]
     it_environment: str
     escalation_mention: str | None
     max_ai_follow_ups: int
@@ -79,12 +82,18 @@ def load_config(env=None) -> Config:
     if " " in label:
         raise ConfigError("JIRA_LABEL can't contain spaces (Jira labels are single words).")
 
+    jira_url = required("JIRA_BASE_URL").rstrip("/")
+    url = urlsplit(jira_url)
+    if not url.hostname or not (url.scheme == "https" or (url.scheme == "http" and url.hostname in _LOCAL_HOSTS)):
+        raise ConfigError("JIRA_BASE_URL must start with https:// (for example https://your-site.atlassian.net), "
+                          "so the Jira API token is encrypted on its way to Jira.")
+
     issue_type = get("JIRA_ISSUE_TYPE", "Task")
     return Config(
         slack_bot_token=bot_token,
         slack_app_token=app_token,
         it_channel=required("IT_CHANNEL"),
-        jira_base_url=required("JIRA_BASE_URL").rstrip("/"),
+        jira_base_url=jira_url,
         jira_email=get("JIRA_EMAIL"),
         jira_api_token=required("JIRA_API_TOKEN"),
         jira_project_key=required("JIRA_PROJECT_KEY").upper(),
@@ -95,6 +104,7 @@ def load_config(env=None) -> Config:
         jira_done_transition=get("JIRA_DONE_TRANSITION"),
         openai_api_key=get("OPENAI_API_KEY"),
         openai_model=get("OPENAI_MODEL", "gpt-4o-mini"),
+        ai_allowed_link_domains=_domain_list(get("AI_ALLOWED_LINK_DOMAINS", "")),
         it_environment=_read_environment_notes(get("IT_ENVIRONMENT_FILE", "it_environment.md")),
         escalation_mention=get("ESCALATION_MENTION"),
         max_ai_follow_ups=number("MAX_AI_FOLLOW_UPS", 3),
@@ -104,6 +114,12 @@ def load_config(env=None) -> Config:
         report_hour=number("REPORT_HOUR", 9),
         report_timezone=get("REPORT_TIMEZONE", "UTC"),
     )
+
+
+def _domain_list(value):
+    """"example.com, *.docs.example.org" -> ("example.com", "docs.example.org")."""
+    domains = (part.strip().lower().removeprefix("*.").strip(".") for part in value.split(","))
+    return tuple(domain for domain in domains if domain)
 
 
 def _read_environment_notes(filename):
