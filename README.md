@@ -1,5 +1,7 @@
 # Slack + Jira IT Help Desk Bot
 
+[![tests](https://github.com/Roj-D0nut/slack-it-chatbot/actions/workflows/tests.yml/badge.svg)](https://github.com/Roj-D0nut/slack-it-chatbot/actions/workflows/tests.yml)
+
 A self-contained lab project that automates first-line IT support between Slack and Jira:
 
 - New posts in your IT channel become **Jira tickets**, each typed, categorised, prioritised and labelled. A greeting
@@ -169,7 +171,8 @@ uv run pytest
 ```
 
 The tests use in-memory fakes for Slack, Jira and OpenAI, so they need no accounts or network. One test sends real
-Slack event and button payloads through Bolt's router to check the wiring.
+Slack event and button payloads through Bolt's router to check the wiring. GitHub Actions runs the same tests and a
+`pyflakes` lint on every push to `main` and on every pull request (`.github/workflows/tests.yml`).
 
 ## Deploying
 
