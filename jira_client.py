@@ -173,3 +173,13 @@ def is_done(fields):
 def noformat(text):
     """Wrap text so Jira shows it exactly as written instead of reading it as wiki markup."""
     return "{noformat}\n" + text.replace("{noformat}", "{ noformat }") + "\n{noformat}"
+
+
+# Anything but letters, digits, spaces and . ' ( ) -, which covers Jira's link, formatting and macro characters,
+# and the ":" and "/" that would let a URL turn into a link.
+_INLINE_UNSAFE = re.compile(r"[^\w .'()-]|_")
+
+
+def safe_inline(text, limit=80):
+    """Make short user-controlled text, such as a Slack display name, safe to show inline in Jira wiki markup."""
+    return " ".join(_INLINE_UNSAFE.sub(" ", text).split())[:limit] or "unknown user"

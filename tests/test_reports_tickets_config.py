@@ -102,6 +102,23 @@ def test_config_defaults_and_environment_notes():
     assert "IT environment notes" in config.it_environment
 
 
+@pytest.mark.parametrize("url", ["https://site.atlassian.net", "http://localhost:8080", "http://127.0.0.1:2990/jira"])
+def test_jira_url_accepted(url):
+    assert make_config(JIRA_BASE_URL=url).jira_base_url == url
+
+
+@pytest.mark.parametrize("url", ["http://jira.example", "jira.example", "ftp://jira.example", "https://"])
+def test_jira_url_must_be_https(url):
+    with pytest.raises(ConfigError, match="https://"):
+        make_config(JIRA_BASE_URL=url)
+
+
+def test_allowed_link_domains_are_normalised():
+    config = make_config(AI_ALLOWED_LINK_DOMAINS=" Microsoft.com, *.docs.example.org ,, .zoom.us. ")
+    assert config.ai_allowed_link_domains == ("microsoft.com", "docs.example.org", "zoom.us")
+    assert make_config().ai_allowed_link_domains == ()
+
+
 @pytest.mark.parametrize("overrides, message", [
     ({"JIRA_PROJECT_KEY": ""}, "JIRA_PROJECT_KEY"),
     ({"SLACK_BOT_TOKEN": "xapp-wrong"}, "xoxb-"),

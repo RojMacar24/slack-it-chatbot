@@ -12,6 +12,7 @@ from assistant import Assistant
 from bot import HelpDesk, is_report_command, resolve_channel_id, schedule_weekly_report
 from config import ConfigError
 from fakes import BOT_USER_ID, CHANNEL_ID, FakeAssistant, FakeJira, FakeSlack, make_config
+from jira_client import JiraError
 
 REQUESTER = "UREQ"
 ENGINEER = "UENG"
@@ -331,6 +332,46 @@ def test_resolve_passes_the_configured_transition_name(slack, jira, ai):
     ts = post(desk, slack, "VPN won't connect")
     click(desk, slack, ts, tickets.RESOLVE_ACTION)
     assert jira.preferred_transition == "Resolve this issue"
+
+
+# --- Security --------------------------------------------------------------------------------------------------
+
+def test_display_names_cant_inject_jira_markup(desk, slack, jira):
+    slack.names[REQUESTER] = "[Reset your password here|https://evil.example]"
+    ts = post(desk, slack, "VPN won't connect")
+    reply(desk, slack, ts, "Still broken")
+
+    first_line = jira.created[0]["description"].splitlines()[0]
+    assert first_line == "Reported in Slack by Reset your password here https evil.example."
+    comment_headers = [body.splitlines()[0] for _, body in jira.comments]
+    assert "Reset your password here https evil.example replied in Slack:" in comment_headers
+    assert not any(char in header for header in comment_headers for char in "[]|")
+
+
+def test_ai_links_outside_the_allowlist_are_removed(slack, jira):
+    ai = FakeAssistant(first_reply="Reset it [on the portal](https://evil.example/login), or see "
+                                   "https://support.microsoft.com/vpn")
+    desk = HelpDesk(make_config(AI_ALLOWED_LINK_DOMAINS="microsoft.com"), slack, jira, ai, BOT_USER_ID, CHANNEL_ID)
+    post(desk, slack, "VPN won't connect")
+    rendered = json.dumps(last_post(slack)["blocks"])
+    assert "evil.example" not in rendered
+    assert "on the portal ([link removed])" in rendered and "https://support.microsoft.com/vpn" in rendered
+
+
+def test_jira_errors_arent_shown_to_users(desk, slack, jira):
+    ts = post(desk, slack, "VPN won't connect")
+
+    def broken(*args, **kwargs):
+        raise JiraError("GET https://jira.internal/rest/api/2/issue/IT-1 returned 500: NullPointerException", 500)
+
+    jira.get_issue = jira.search = broken
+    click(desk, slack, ts, tickets.RESOLVE_ACTION)
+    note = slack.calls_to("chat_postEphemeral")[-1]["text"]
+    assert "IT-1" in note and "jira.internal" not in note and "NullPointer" not in note
+
+    desk.on_mention({"channel": CHANNEL_ID, "user": REQUESTER, "text": f"<@{BOT_USER_ID}> report", "ts": "9.9"})
+    report = last_post(slack)["text"]
+    assert "couldn't build the report" in report and "jira.internal" not in report
 
 
 # --- Buttons ---------------------------------------------------------------------------------------------------

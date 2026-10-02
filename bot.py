@@ -21,7 +21,7 @@ import reports
 import tickets
 from assistant import Assistant, is_small_talk
 from config import ConfigError, load_config
-from jira_client import JiraClient, JiraError, is_done, noformat
+from jira_client import JiraClient, JiraError, is_done, noformat, safe_inline
 from text_utils import redact_secrets, slack_to_plain, to_slack_mrkdwn
 
 logger = logging.getLogger("it_bot")
@@ -144,7 +144,8 @@ class HelpDesk:
             announcement, problem = action(ticket, user)
         except JiraError as exc:
             logger.error("Jira rejected a button action on %s: %s", ticket.key, exc)
-            self._ephemeral(channel, user, ticket, f":warning: Jira didn't accept that change: {exc}")
+            self._ephemeral(channel, user, ticket, f":warning: Jira didn't accept that change to {ticket.key}. "
+                                                   "The IT team can see the details in the bot's log.")
             return
         if problem:
             self._ephemeral(channel, user, ticket, problem)
@@ -199,7 +200,7 @@ class HelpDesk:
         if not text and not files:
             return
         self._remember(user, ticket, ts)
-        self._comment(ticket.key, f"{self.user_name(user)} added in a separate Slack post:\n"
+        self._comment(ticket.key, f"{self._jira_name(user)} added in a separate Slack post:\n"
                       + noformat(text or f"(No text. Attachments in Slack: {len(files)})"))
         thread_link = self._permalink(channel, ticket.thread_ts) or self.jira.browse_url(ticket.key)
         self.slack.chat_postMessage(channel=channel, thread_ts=ts, text=tickets.linked_text(ticket.key, thread_link),
@@ -258,7 +259,7 @@ class HelpDesk:
 
         logger.info("Opened %s (%s, %s) for %s", key, triage.kind, triage.category, requester)
         ticket = tickets.TicketRef(key=key, creator=requester, thread_ts=thread_ts)
-        reply = to_slack_mrkdwn(ai_reply) if ai_reply else ""
+        reply = self._format_ai(ai_reply) if ai_reply else ""
         self.slack.chat_postMessage(
             channel=channel,
             thread_ts=thread_ts,
@@ -282,7 +283,7 @@ class HelpDesk:
                 return
             text = self._clean(event.get("text", ""))
             if text:
-                self._comment(ticket.key, f"{self.user_name(author)} replied in Slack:\n" + noformat(text))
+                self._comment(ticket.key, f"{self._jira_name(author)} replied in Slack:\n" + noformat(text))
             if author == ticket.creator:
                 self._ai_follow_up(channel, ticket, messages, text, event["ts"])
 
@@ -306,7 +307,7 @@ class HelpDesk:
         key = tickets.find_linked_ticket(messages, self.bot_user_id)
         text = self._clean(event.get("text", ""))
         if key and text:
-            self._comment(key, f"{self.user_name(author)} replied in Slack:\n" + noformat(text))
+            self._comment(key, f"{self._jira_name(author)} replied in Slack:\n" + noformat(text))
 
     def _ai_follow_up(self, channel, ticket, messages, new_text, new_ts):
         """Post the AI's next reply in the ticket thread, unless it should stay out of the way.
@@ -345,7 +346,7 @@ class HelpDesk:
             logger.exception("AI follow-up failed for %s", ticket.key)
             return
         if answer:
-            self._post_reply(channel, ticket, to_slack_mrkdwn(answer))
+            self._post_reply(channel, ticket, self._format_ai(answer))
             self._comment(ticket.key, "AI assistant replied in Slack:\n" + noformat(answer))
 
     def resolve(self, ticket, user):
@@ -357,7 +358,7 @@ class HelpDesk:
                            "workflow transition that resolves tickets.", ticket.key)
             return None, f"I couldn't find a way to close {ticket.key} in its Jira workflow. IT staff can close it in Jira."
         self._forget(ticket)
-        self._comment(ticket.key, f"{self.user_name(user)} marked this resolved from Slack.")
+        self._comment(ticket.key, f"{self._jira_name(user)} marked this resolved from Slack.")
         return f":white_check_mark: <{self.jira.browse_url(ticket.key)}|{ticket.key}> is closed. Glad it's sorted!", None
 
     def escalate(self, ticket, user):
@@ -368,7 +369,7 @@ class HelpDesk:
         if tickets.ESCALATED_LABEL in (fields.get("labels") or []):
             return None, f"{ticket.key} has already been escalated."
         self.jira.add_labels(ticket.key, [tickets.ESCALATED_LABEL])
-        self._comment(ticket.key, f"{self.user_name(user)} escalated this from Slack. The AI assistant has stopped replying.")
+        self._comment(ticket.key, f"{self._jira_name(user)} escalated this from Slack. The AI assistant has stopped replying.")
         who = self.config.escalation_mention or "The IT team"
         return f":sos: <{self.jira.browse_url(ticket.key)}|{ticket.key}> has been escalated. {who} will take it from here.", None
 
@@ -379,7 +380,8 @@ class HelpDesk:
             return reports.build_report(self.jira, self.config.jira_project_key, self.config.jira_label)
         except JiraError as exc:
             logger.error("Couldn't build the report: %s", exc)
-            return f":warning: I couldn't build the report: {exc}"
+            return (":warning: I couldn't build the report because Jira didn't respond as expected. "
+                    "The IT team can see the details in the bot's log.")
 
     def post_weekly_report(self):
         self.slack.chat_postMessage(channel=self.channel_id, text=self.report_text())
@@ -389,8 +391,15 @@ class HelpDesk:
     def _clean(self, text):
         return redact_secrets(slack_to_plain(text, self.user_name))
 
+    def _jira_name(self, user_id):
+        """A Slack display name made safe for Jira, since anyone can set their display name to Jira markup."""
+        return safe_inline(self.user_name(user_id))
+
+    def _format_ai(self, text):
+        return to_slack_mrkdwn(text, self.config.ai_allowed_link_domains)
+
     def _description(self, requester, channel, ts, text, file_count):
-        lines = [f"Reported in Slack by {self.user_name(requester)}."]
+        lines = [f"Reported in Slack by {self._jira_name(requester)}."]
         permalink = self._permalink(channel, ts)
         if permalink:
             lines.append(f"Slack thread: {permalink}")

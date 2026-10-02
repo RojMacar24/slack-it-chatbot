@@ -4,7 +4,9 @@ import json
 import pytest
 import requests
 
-from jira_client import JiraClient, JiraError, is_done, noformat, pick_done_transition, pick_resolution
+from jira_client import (
+    JiraClient, JiraError, is_done, noformat, pick_done_transition, pick_resolution, safe_inline,
+)
 
 
 class FakeResponse:
@@ -170,6 +172,18 @@ def test_data_center_search_pages_by_offset():
     )
     assert [i["key"] for i in jira.search("project = IT", ["status"])] == ["IT-1", "IT-2"]
     assert session.requests[1][2]["params"]["startAt"] == 1
+
+
+@pytest.mark.parametrize("name, expected", [
+    ("Sam Rivera", "Sam Rivera"),
+    ("José O'Neil-Smith (IT)", "José O'Neil-Smith (IT)"),
+    ("[Reset your password here|https://evil.example]", "Reset your password here https evil.example"),
+    ("*bold* _italic_ {color:red}x{color} !img.png!", "bold italic color red x color img.png"),
+    ("👻", "unknown user"),
+    ("x" * 200, "x" * 80),
+])
+def test_safe_inline(name, expected):
+    assert safe_inline(name) == expected
 
 
 def test_helpers():

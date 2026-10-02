@@ -126,7 +126,7 @@ invited yet. Then post something like *"My VPN keeps disconnecting"* in the chan
 | `SLACK_BOT_TOKEN` | yes | | `xoxb-…` |
 | `SLACK_APP_TOKEN` | yes | | `xapp-…`, needs `connections:write` |
 | `IT_CHANNEL` | yes | | Channel name, or ID for private channels |
-| `JIRA_BASE_URL` | yes | | e.g. `https://your-site.atlassian.net` |
+| `JIRA_BASE_URL` | yes | | e.g. `https://your-site.atlassian.net`. Must be `https://`, except for `localhost` |
 | `JIRA_EMAIL` | Cloud only | | Leave empty for Data Center |
 | `JIRA_API_TOKEN` | yes | | Cloud API token or Data Center PAT |
 | `JIRA_PROJECT_KEY` | yes | | e.g. `IT` |
@@ -137,6 +137,7 @@ invited yet. Then post something like *"My VPN keeps disconnecting"* in the chan
 | `JIRA_DONE_TRANSITION` | | | Exact transition name for "That fixed it", if the automatic choice is wrong |
 | `OPENAI_API_KEY` | | | Turns on AI triage and replies |
 | `OPENAI_MODEL` | | `gpt-4o-mini` | Any chat model that supports JSON mode |
+| `AI_ALLOWED_LINK_DOMAINS` | | | Comma-separated. If set, links in AI replies to other domains are removed |
 | `IT_ENVIRONMENT_FILE` | | `it_environment.md` | Context for the AI |
 | `ESCALATION_MENTION` | | "The IT team" | `<@U…>` or `<!subteam^S…>` to ping on escalation |
 | `MAX_AI_FOLLOW_UPS` | | `3` | AI replies per ticket after the first answer |
