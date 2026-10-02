@@ -6,10 +6,11 @@ import pytest
 from slack_bolt import App
 from slack_bolt.authorization import AuthorizeResult
 from slack_bolt.request import BoltRequest
+from slack_sdk.errors import SlackApiError
 
 import tickets
 from assistant import Assistant
-from bot import HelpDesk, is_report_command, resolve_channel_id, schedule_weekly_report
+from bot import HelpDesk, check_channel_access, is_report_command, resolve_channel_id, schedule_weekly_report
 from config import ConfigError
 from fakes import BOT_USER_ID, CHANNEL_ID, FakeAssistant, FakeJira, FakeSlack, make_config
 from jira_client import JiraError
@@ -443,6 +444,30 @@ def test_resolve_channel_id_pages_through_channels():
     assert resolve_channel_id(Pages(), "C0ABCDEF12") == "C0ABCDEF12"
     with pytest.raises(ConfigError):
         resolve_channel_id(Pages(), "missing")
+
+
+class SlackWithoutScopes:
+    """A Slack client whose channel calls fail the way they do when the app lacks a scope."""
+
+    def __init__(self, member=True):
+        self.member = member
+
+    def conversations_info(self, channel):
+        if channel.startswith("G"):
+            raise SlackApiError("missing scope", {"ok": False, "error": "missing_scope"})
+        return {"channel": {"id": channel, "is_member": self.member}}
+
+    def conversations_list(self, **kwargs):
+        raise SlackApiError("missing scope", {"ok": False, "error": "missing_scope"})
+
+
+def test_startup_explains_what_to_fix_when_the_channel_cant_be_read():
+    assert check_channel_access(SlackWithoutScopes(member=True), "C0ABCDEF12") is True
+    assert check_channel_access(SlackWithoutScopes(member=False), "C0ABCDEF12") is False
+    with pytest.raises(ConfigError, match=r"can't read channel G0PRIVATE1 \(missing_scope\).*groups:history"):
+        check_channel_access(SlackWithoutScopes(), "G0PRIVATE1")
+    with pytest.raises(ConfigError, match=r"Couldn't list Slack channels to find #it-help \(missing_scope\)"):
+        resolve_channel_id(SlackWithoutScopes(), "#it-help")
 
 
 def test_weekly_report_schedule_uses_configured_time(desk):

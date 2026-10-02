@@ -102,6 +102,11 @@ def test_assess_survives_model_failures(client):
     assert triage == keyword_triage("Printer is jammed") and reply == ""
 
 
+def test_openai_client_gives_up_quickly():
+    client = Assistant(api_key="sk-test-not-a-real-key")._client
+    assert (client.timeout, client.max_retries) == (15, 1)
+
+
 def test_without_a_key_the_assistant_is_off():
     assistant = Assistant(api_key=None)
     assert not assistant.enabled

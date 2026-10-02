@@ -154,10 +154,16 @@ IT environment notes:
 {environment}"""
 
 
+# Ticket creation holds the requester's lock while it waits for the model, so give up quickly and let the keyword
+# rules take over: at most two 15-second attempts, rather than a minute and a half.
+OPENAI_TIMEOUT_SECONDS = 15
+OPENAI_MAX_RETRIES = 1
+
+
 class Assistant:
     def __init__(self, api_key=None, model="gpt-4o-mini", environment="", client=None):
         if client is None and api_key:
-            client = OpenAI(api_key=api_key, timeout=30, max_retries=2)
+            client = OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT_SECONDS, max_retries=OPENAI_MAX_RETRIES)
         self._client = client
         self.model = model
         self.environment = environment.strip() or "No environment notes were provided."
