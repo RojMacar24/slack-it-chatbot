@@ -227,7 +227,7 @@ See [SECURITY.md](SECURITY.md) for how data and credentials are handled.
 
 ## Author and copyright
 
-Built by Roj ([@Roj-D0nut](https://github.com/Roj-D0nut)).
+Built by Rojie M. ([@Roj-D0nut](https://github.com/Roj-D0nut)).
 
-© 2026 Roj. All rights reserved. No license is granted to copy, modify or redistribute this code. You're welcome to
+© 2026 Rojie M. All rights reserved. No license is granted to copy, modify or redistribute this code. You're welcome to
 read it; please ask before reusing any of it.
