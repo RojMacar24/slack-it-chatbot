@@ -2,6 +2,27 @@
 
 [![tests](https://github.com/Roj-D0nut/slack-it-chatbot/actions/workflows/tests.yml/badge.svg)](https://github.com/Roj-D0nut/slack-it-chatbot/actions/workflows/tests.yml)
 
+**A Slack bot that turns IT requests into triaged Jira tickets, answers with first-line troubleshooting, and keeps
+each ticket up to date with the Slack conversation until the problem is solved.**
+
+## Highlights
+
+- **End-to-end automation.** A Slack post becomes a typed, prioritised, labelled Jira ticket within seconds. Thread
+  replies become Jira comments, and buttons in Slack resolve or escalate the ticket in Jira.
+- **AI with guardrails.** OpenAI returns structured triage that the bot validates, with a keyword-rule fallback, so
+  tickets still flow when there's no API key or the API fails. The AI steps back as soon as someone from IT joins.
+- **Built for real conversations.** Greetings get asked for details, split messages merge into one ticket, replies
+  sent while a ticket is being created aren't lost, and two quick replies get one answer.
+- **Secure by default.** Passwords and tokens are masked before anything reaches Jira or OpenAI, AI output is escaped
+  so it can't ping a whole channel, and the Slack app asks only for the permissions it uses.
+- **Simple to run, thoroughly tested.** No database (Jira is the source of truth) and no public URL (Slack Socket
+  Mode). Over 100 automated tests with fake Slack, Jira and OpenAI clients run on every pull request.
+
+**Tech:** Python 3.12 · Slack Bolt (Socket Mode, Block Kit) · Jira REST API (Cloud and Data Center) · OpenAI API ·
+APScheduler · pytest · GitHub Actions
+
+## What it does
+
 A self-contained lab project that automates first-line IT support between Slack and Jira:
 
 - New posts in your IT channel become **Jira tickets**, each typed, categorised, prioritised and labelled. A greeting
@@ -14,7 +35,7 @@ A self-contained lab project that automates first-line IT support between Slack 
 
 It runs over Slack **Socket Mode**, so it needs no public URL, web server or database. You can run it on a laptop.
 
-```
+```text
  Slack #it-help                      bot.py                          Jira
  ──────────────                      ──────                          ────
  "VPN keeps dropping"  ──event──▶  triage (AI or keywords)  ──────▶  create IT-42
@@ -133,6 +154,7 @@ keyword rules, and so does any API failure. Access and change requests get an ac
 automation rules easy, for example `labels = escalated AND statusCategory != Done`.
 
 **Greetings and split posts.** People rarely put a whole problem in one message:
+
 - A post with no details yet, like "Hi team" or "quick question", gets a reply asking what's going on. When that
   person answers in the thread, the ticket opens there.
 - If the same person posts again within `MERGE_WINDOW_SECONDS` (2 minutes by default), the new post joins their
@@ -202,3 +224,10 @@ variables there instead of using a `.env` file.
 - **Another AI provider:** everything model-specific is in `assistant.py`.
 
 See [SECURITY.md](SECURITY.md) for how data and credentials are handled.
+
+## Author and copyright
+
+Built by Roj ([@Roj-D0nut](https://github.com/Roj-D0nut)).
+
+© 2026 Roj. All rights reserved. No license is granted to copy, modify or redistribute this code. You're welcome to
+read it; please ask before reusing any of it.
