@@ -453,7 +453,11 @@ def resolve_channel_id(slack, channel):
         kwargs = {"types": "public_channel", "exclude_archived": True, "limit": 200}
         if cursor:
             kwargs["cursor"] = cursor
-        page = slack.conversations_list(**kwargs)
+        try:
+            page = slack.conversations_list(**kwargs)
+        except SlackApiError as exc:
+            raise ConfigError(f"Couldn't list Slack channels to find #{name} ({_slack_error(exc)}). Check that the "
+                              "app has the channels:read scope, or set IT_CHANNEL to the channel ID.") from None
         for found in page["channels"]:
             if found["name"] == name:
                 return found["id"]
@@ -461,6 +465,23 @@ def resolve_channel_id(slack, channel):
         if not cursor:
             raise ConfigError(f"There's no public channel named #{name}. Check IT_CHANNEL, "
                               "or set it to the channel ID if the channel is private.")
+
+
+def check_channel_access(slack, channel_id):
+    """Fail at startup, with a fix, if the bot can't read the IT channel. Returns whether it's a member yet."""
+    try:
+        channel = slack.conversations_info(channel=channel_id)["channel"]
+    except SlackApiError as exc:
+        raise ConfigError(
+            f"The bot can't read channel {channel_id} ({_slack_error(exc)}). If it's a private channel, add the "
+            "groups:read and groups:history scopes and the message.groups event to the Slack app, reinstall the app, "
+            "and invite the bot to the channel.") from None
+    return bool(channel.get("is_member"))
+
+
+def _slack_error(exc):
+    response = getattr(exc, "response", None)
+    return (response.get("error") if response is not None else None) or "unknown error"
 
 
 def schedule_weekly_report(desk, config):
@@ -494,9 +515,10 @@ def main():
     bot_user_id = app.client.auth_test()["user_id"]
     try:
         channel_id = resolve_channel_id(app.client, config.it_channel)
+        is_member = check_channel_access(app.client, channel_id)
     except ConfigError as exc:
         raise SystemExit(f"Configuration problem: {exc}") from None
-    if not app.client.conversations_info(channel=channel_id)["channel"].get("is_member"):
+    if not is_member:
         logger.warning("The bot isn't a member of %s yet, so it won't see any posts. Run /invite @<bot name> there.",
                        config.it_channel)
 

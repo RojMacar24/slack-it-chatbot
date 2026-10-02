@@ -125,7 +125,18 @@ def test_allowed_link_domains_are_normalised():
     ({"SLACK_APP_TOKEN": "xoxb-wrong"}, "xapp-"),
     ({"MAX_AI_FOLLOW_UPS": "lots"}, "whole number"),
     ({"JIRA_LABEL": "two words"}, "spaces"),
+    ({"REPORT_HOUR": "25"}, "REPORT_HOUR must be between 0 and 23"),
+    ({"REPORT_HOUR": "-1"}, "REPORT_HOUR must be between 0 and 23"),
+    ({"REPORT_TIMEZONE": "Mars/Base"}, "REPORT_TIMEZONE 'Mars/Base' isn't a known time zone"),
+    ({"REPORT_DAY": "someday"}, "REPORT_DAY 'someday' isn't valid"),
 ])
 def test_config_errors(overrides, message):
     with pytest.raises(ConfigError, match=message):
         make_config(**overrides)
+
+
+def test_report_schedule_settings():
+    config = make_config(REPORT_DAY="mon-fri", REPORT_HOUR="0", REPORT_TIMEZONE="America/New_York")
+    assert (config.report_day, config.report_hour, config.report_timezone) == ("mon-fri", 0, "America/New_York")
+    # With the report off, its settings don't matter
+    assert not make_config(REPORT_ENABLED="false", REPORT_HOUR="99", REPORT_DAY="someday").report_enabled

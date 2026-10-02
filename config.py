@@ -4,7 +4,9 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -88,6 +90,13 @@ def load_config(env=None) -> Config:
         raise ConfigError("JIRA_BASE_URL must start with https:// (for example https://your-site.atlassian.net), "
                           "so the Jira API token is encrypted on its way to Jira.")
 
+    report_enabled = flag("REPORT_ENABLED", True)
+    report_day = get("REPORT_DAY", "mon")
+    report_hour = number("REPORT_HOUR", 9)
+    report_timezone = get("REPORT_TIMEZONE", "UTC")
+    if report_enabled:
+        _check_report_schedule(report_day, report_hour, report_timezone)
+
     issue_type = get("JIRA_ISSUE_TYPE", "Task")
     return Config(
         slack_bot_token=bot_token,
@@ -109,11 +118,27 @@ def load_config(env=None) -> Config:
         escalation_mention=get("ESCALATION_MENTION"),
         max_ai_follow_ups=number("MAX_AI_FOLLOW_UPS", 3),
         merge_window_seconds=number("MERGE_WINDOW_SECONDS", 120),
-        report_enabled=flag("REPORT_ENABLED", True),
-        report_day=get("REPORT_DAY", "mon"),
-        report_hour=number("REPORT_HOUR", 9),
-        report_timezone=get("REPORT_TIMEZONE", "UTC"),
+        report_enabled=report_enabled,
+        report_day=report_day,
+        report_hour=report_hour,
+        report_timezone=report_timezone,
     )
+
+
+def _check_report_schedule(day, hour, timezone):
+    """Catch schedule mistakes here, with a clear message, instead of as a traceback when the scheduler starts."""
+    if not 0 <= hour <= 23:
+        raise ConfigError(f"REPORT_HOUR must be between 0 and 23, got {hour}.")
+    try:
+        ZoneInfo(timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise ConfigError(f"REPORT_TIMEZONE {timezone!r} isn't a known time zone. "
+                          "Use a name like UTC or America/New_York.") from None
+    try:
+        CronTrigger(day_of_week=day, hour=hour, timezone=timezone)
+    except ValueError:
+        raise ConfigError(f"REPORT_DAY {day!r} isn't valid. Use mon, tue, wed, thu, fri, sat or sun, "
+                          "or a range such as mon-fri.") from None
 
 
 def _domain_list(value):

@@ -203,6 +203,10 @@ Socket Mode only needs a long-running process that can make outbound connections
 `Procfile` (`worker: python bot.py`) works on hosts such as Railway, Render or Heroku. Set the same environment
 variables there instead of using a `.env` file.
 
+**Run only one copy at a time.** If two copies run (for example on your laptop and on a host), Slack splits
+incoming messages between them. Each copy then only sees part of every conversation: split posts may not be merged
+into one ticket, and both copies post the weekly report. Stop the local copy before starting a hosted one.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
