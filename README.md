@@ -46,6 +46,11 @@ It runs over Slack **Socket Mode**, so it needs no public URL, web server or dat
  [🆘 Escalate to IT]    ──button─▶  label "escalated"        ──────▶  IT-42 + label, comment
 ```
 
+## Run it yourself
+
+The bot runs on a laptop with free Slack and Jira accounts; OpenAI is optional. **[SETUP.md](SETUP.md)** walks
+through it step by step in about 45 minutes, and lists every setting, how to deploy it and how to troubleshoot it.
+
 ## Project layout
 
 | File | What it does |
@@ -60,89 +65,7 @@ It runs over Slack **Socket Mode**, so it needs no public URL, web server or dat
 | `it_environment.md` | Describes your lab's tools. Sent to the AI so its advice fits |
 | `slack-app-manifest.yml` | Creates the Slack app with the right scopes in one step |
 | `tests/` | Offline tests with fake Slack, Jira and OpenAI clients |
-
-## Setup
-
-You need Python 3.11+ (3.12 recommended), a Slack workspace where you can install apps, and a Jira site.
-Free tiers of both are fine.
-
-### 1. Jira
-
-1. Create a free Jira Cloud site at <https://www.atlassian.com/software/jira/free> if you don't have one.
-2. Create a project for IT tickets. Note its **key**, for example `IT`. A company-managed software project works
-   out of the box. For a Jira Service Management project, set `JIRA_ISSUE_TYPE` and `JIRA_REQUEST_ISSUE_TYPE`
-   to its issue type names.
-3. Create an API token at <https://id.atlassian.com/manage-profile/security/api-tokens>.
-
-On **Jira Data Center**, create a personal access token instead and leave `JIRA_EMAIL` empty.
-
-### 2. Slack
-
-1. Go to <https://api.slack.com/apps>, choose **Create New App**, then **From a manifest**. Pick your workspace and
-   paste in `slack-app-manifest.yml`.
-2. **Install to Workspace**, then copy the **Bot User OAuth Token** (`xoxb-…`) from *OAuth & Permissions*.
-3. Under *Basic Information*, then *App-Level Tokens*, create a token with the `connections:write` scope and copy it (`xapp-…`).
-4. Create your IT channel (for example `#it-help`) and invite the bot: `/invite @IT Help Desk`.
-
-### 3. OpenAI (optional)
-
-Create an API key at <https://platform.openai.com/api-keys>. Without one, the bot still opens, labels, comments on,
-closes and escalates tickets. It just uses keyword rules for triage and doesn't post troubleshooting replies.
-
-### 4. Configure
-
-```bash
-cp .env.example .env
-```
-
-Fill in `.env`. Everything is explained in `.env.example`. Then edit `it_environment.md` to describe your lab's tools.
-
-### 5. Run
-
-With [uv](https://docs.astral.sh/uv/):
-
-```bash
-uv venv
-uv pip install -r requirements.txt
-uv run python bot.py
-```
-
-Or with plain pip:
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate          # macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
-python bot.py
-```
-
-On startup the bot checks the Jira credentials and project, looks up the channel, and warns you if it hasn't been
-invited yet. Then post something like *"My VPN keeps disconnecting"* in the channel.
-
-## Configuration
-
-| Variable | Required | Default | Notes |
-|---|---|---|---|
-| `SLACK_BOT_TOKEN` | yes | | `xoxb-…` |
-| `SLACK_APP_TOKEN` | yes | | `xapp-…`, needs `connections:write` |
-| `IT_CHANNEL` | yes | | Channel name, or ID for private channels |
-| `JIRA_BASE_URL` | yes | | e.g. `https://your-site.atlassian.net`. Must be `https://`, except for `localhost` |
-| `JIRA_EMAIL` | Cloud only | | Leave empty for Data Center |
-| `JIRA_API_TOKEN` | yes | | Cloud API token or Data Center PAT |
-| `JIRA_PROJECT_KEY` | yes | | e.g. `IT` |
-| `JIRA_ISSUE_TYPE` | | `Task` | Issue type for incidents |
-| `JIRA_REQUEST_ISSUE_TYPE` | | same as above | Issue type for access and change requests |
-| `JIRA_LABEL` | | `slack-it-bot` | Added to every ticket, and used by the report |
-| `JIRA_SET_PRIORITY` | | `true` | The bot retries without a priority if Jira rejects it |
-| `JIRA_DONE_TRANSITION` | | | Exact transition name for "That fixed it", if the automatic choice is wrong |
-| `OPENAI_API_KEY` | | | Turns on AI triage and replies |
-| `OPENAI_MODEL` | | `gpt-4o-mini` | Any chat model that supports JSON mode |
-| `AI_ALLOWED_LINK_DOMAINS` | | | Comma-separated. If set, links in AI replies to other domains are removed |
-| `IT_ENVIRONMENT_FILE` | | `it_environment.md` | Context for the AI |
-| `ESCALATION_MENTION` | | "The IT team" | `<@U…>` or `<!subteam^S…>` to ping on escalation |
-| `MAX_AI_FOLLOW_UPS` | | `3` | AI replies per ticket after the first answer |
-| `MERGE_WINDOW_SECONDS` | | `120` | Extra posts from the same person within this time join their last ticket. `0` turns it off |
-| `REPORT_ENABLED` / `REPORT_DAY` / `REPORT_HOUR` / `REPORT_TIMEZONE` | | `true` / `mon` / `9` / `UTC` | Weekly report schedule |
+| `SETUP.md` | Step-by-step setup, every setting, deploying and troubleshooting |
 
 ## How it works
 
@@ -196,28 +119,6 @@ uv run pytest
 The tests use in-memory fakes for Slack, Jira and OpenAI, so they need no accounts or network. One test sends real
 Slack event and button payloads through Bolt's router to check the wiring. GitHub Actions runs the same tests and a
 `pyflakes` lint on every push to `main` and on every pull request (`.github/workflows/tests.yml`).
-
-## Deploying
-
-Socket Mode only needs a long-running process that can make outbound connections. It needs no inbound port. The
-`Procfile` (`worker: python bot.py`) works on hosts such as Railway, Render or Heroku. Set the same environment
-variables there instead of using a `.env` file.
-
-**Run only one copy at a time.** If two copies run (for example on your laptop and on a host), Slack splits
-incoming messages between them. Each copy then only sees part of every conversation: split posts may not be merged
-into one ticket, and both copies post the weekly report. Stop the local copy before starting a hosted one.
-
-## Troubleshooting
-
-| Symptom | Likely cause |
-|---|---|
-| Bot never reacts | It isn't in the channel (`/invite`), or the app is missing the `message.channels` event |
-| `Couldn't reach Jira project` at startup | Wrong URL, email or token, or the account can't see the project |
-| `issuetype: … invalid` | `JIRA_ISSUE_TYPE` doesn't exist in the project. Check the names under *Project settings*, then *Issue types* |
-| `labels` error when creating | The Labels field isn't on the project's create screen |
-| "couldn't find a way to close" | The workflow has no non-cancel transition to a Done status from the current one. Set `JIRA_DONE_TRANSITION` to the transition's exact name |
-| Buttons do nothing | Interactivity is off in the Slack app settings (the manifest turns it on) |
-| Private channel not found | Use the channel ID in `IT_CHANNEL`, add `groups:history` and `groups:read`, and subscribe to `message.groups` |
 
 ## Ideas for extending the lab
 
