@@ -79,8 +79,8 @@ automation rules easy, for example `labels = escalated AND statusCategory != Don
 
 **Greetings and split posts.** People rarely put a whole problem in one message:
 
-- A post with no details yet, like "Hi team" or "quick question", gets a reply asking what's going on. When that
-  person answers in the thread, the ticket opens there.
+- A post with no details yet, like "Hi team", "quick question" or "I have a problem", gets a reply asking what's
+  going on. When that person answers in the thread, the ticket opens there.
 - If the same person posts again within `MERGE_WINDOW_SECONDS` (2 minutes by default), the new post joins their
   last ticket instead of opening another. It's added to Jira as a comment, the new post gets a link back to the
   ticket thread, and the AI answers there with the new detail in mind. Replies under the extra post are copied to
@@ -107,7 +107,8 @@ Everyone's replies are still copied to Jira.
 **Buttons.** Only the requester can use them. Anyone else gets a private note saying so. To close a ticket, the bot
 picks a transition into a Done-category status, preferring names like Done, Resolve or Close. It never uses
 cancel-style transitions ("Cancel", "Won't do", "Duplicate"). If the transition asks for a resolution, it fills in
-Done or Fixed. Set `JIRA_DONE_TRANSITION` to override the choice.
+Done or Fixed. Set `JIRA_DONE_TRANSITION` to override the choice. Once a ticket is closed or escalated, the buttons
+come off every message in its thread.
 
 ## Tests
 

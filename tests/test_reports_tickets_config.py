@@ -78,9 +78,15 @@ def test_greeting_and_merge_helpers():
     assert tickets.has_later_message_from([parent, prompt, details], "UREQ", "1.0")
     assert not tickets.has_later_message_from([parent, prompt, details], "UREQ", "1.2")
 
-    pointer = {"ts": "2.1", "user": BOT_USER_ID, "text": tickets.linked_text("IT-7", "https://slack.example/p1")}
+    text = tickets.linked_text("IT-7", "https://jira.example/browse/IT-7", "https://slack.example/p1")
+    assert text == ("Added to ticket <https://jira.example/browse/IT-7|IT-7>: "
+                    "<https://slack.example/p1|continue in the ticket thread>")
+    pointer = {"ts": "2.1", "user": BOT_USER_ID, "text": text}
     assert tickets.find_linked_ticket([{"ts": "2.0", "user": "UREQ"}, pointer], BOT_USER_ID) == "IT-7"
     assert tickets.find_ticket([{"ts": "2.0", "user": "UREQ"}, pointer], BOT_USER_ID) is None
+    # Replies posted before #28 used a plain key and must still be recognised
+    old = {"ts": "2.1", "user": BOT_USER_ID, "text": "Added to ticket IT-6: <https://slack.example/p1|continue in the ticket thread>"}
+    assert tickets.find_linked_ticket([{"ts": "2.0", "user": "UREQ"}, old], BOT_USER_ID) == "IT-6"
 
 
 def test_ticket_message_escapes_the_summary():

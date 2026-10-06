@@ -1,3 +1,4 @@
+import copy
 import json
 import threading
 import time
@@ -58,18 +59,22 @@ def reply(desk, slack, thread_ts, text, user=REQUESTER, dispatch=True):
     return event
 
 
-def click(desk, slack, thread_ts, action_id, user=REQUESTER):
-    """Press a button on the first bot message in the thread that has buttons."""
-    message = next(m for m in slack.threads[thread_ts] if m.get("blocks") and tickets.without_buttons(m["blocks"]) != m["blocks"])
+def button_body(slack, thread_ts, action_id, user=REQUESTER, nth=0):
+    """The payload Slack sends when `user` presses a button on the nth bot message in the thread that has buttons."""
+    message = copy.deepcopy([m for m in slack.threads[thread_ts] if tickets.has_buttons(m.get("blocks"))][nth])
     buttons = next(b for b in message["blocks"] if b["type"] == "actions")["elements"]
     button = next(b for b in buttons if b["action_id"] == action_id)
-    body = {
+    return {
         "user": {"id": user},
         "channel": {"id": CHANNEL_ID},
         "actions": [{"action_id": action_id, "value": button["value"]}],
         "container": {"message_ts": message["ts"]},
         "message": message,
     }
+
+
+def click(desk, slack, thread_ts, action_id, user=REQUESTER, nth=0):
+    body = button_body(slack, thread_ts, action_id, user, nth)
     desk.on_button(body, desk.resolve if action_id == tickets.RESOLVE_ACTION else desk.escalate)
 
 
@@ -232,6 +237,13 @@ def test_greeting_asks_for_details_and_the_answer_opens_the_ticket_there(desk, s
     assert len(ai.histories) == 1  # the greeting prompt doesn't count towards the AI reply limit
 
 
+@pytest.mark.parametrize("text", ["have a problem", "I have an issue", "it's not working", "Something is wrong"])
+def test_posts_without_details_get_asked_for_them(desk, slack, jira, text):
+    post(desk, slack, text)
+    assert jira.created == []
+    assert last_post(slack)["text"].startswith(f"Hi <@{REQUESTER}>! What's going on?")
+
+
 def test_only_the_person_who_said_hi_can_open_a_ticket_from_the_greeting(desk, slack, jira):
     ts = post(desk, slack, "Hello, anyone around?")
     reply(desk, slack, ts, "What's up?", user=ENGINEER)
@@ -245,7 +257,8 @@ def test_split_posts_go_into_one_ticket(desk, slack, jira, ai):
     assert len(jira.created) == 1
     assert ("IT-1", "UREQ added in a separate Slack post:\n{noformat}\nIt shows error 809\n{noformat}") in jira.comments
     pointer = next(call for call in slack.calls_to("chat_postMessage") if call["thread_ts"] == second)
-    assert pointer["text"].startswith(f"Added to ticket IT-1: <https://slack.example/archives/{CHANNEL_ID}/p")
+    assert pointer["text"].startswith(
+        f"Added to ticket <https://jira.example/browse/IT-1|IT-1>: <https://slack.example/archives/{CHANNEL_ID}/p")
     assert last_post(slack)["thread_ts"] == first  # the AI answers in the ticket thread...
     assert ai.histories[-1][-1] == {"role": "user", "content": "It shows error 809"}  # ...with the new detail
 
@@ -388,16 +401,40 @@ def test_only_the_requester_can_use_the_buttons(desk, slack, jira):
 
 def test_resolve_closes_the_ticket_and_removes_the_buttons(desk, slack, jira):
     ts = post(desk, slack, "VPN won't connect")
+    stale = button_body(slack, ts, tickets.RESOLVE_ACTION)  # the same button, still showing in another window
     click(desk, slack, ts, tickets.RESOLVE_ACTION)
 
     assert jira.issues["IT-1"]["status"]["statusCategory"]["key"] == "done"
     assert ":white_check_mark:" in last_post(slack)["text"]
     [update] = slack.calls_to("chat_update")
     assert update["text"].startswith("Ticket IT-1 created")  # keeps the text find_ticket relies on
-    assert "actions" not in json.dumps(update["blocks"])
+    assert not tickets.has_buttons(update["blocks"])
 
-    click(desk, slack, ts, tickets.RESOLVE_ACTION)
+    desk.on_button(stale, desk.resolve)
     assert "already closed" in slack.calls_to("chat_postEphemeral")[-1]["text"]
+
+
+def test_closing_removes_the_buttons_from_every_message_in_the_thread(desk, slack, jira):
+    ts = post(desk, slack, "VPN won't connect")
+    reply(desk, slack, ts, "Still failing")  # the AI's follow-up has buttons too
+    with_buttons = [m["ts"] for m in slack.threads[ts] if tickets.has_buttons(m.get("blocks"))]
+    assert len(with_buttons) == 2
+
+    click(desk, slack, ts, tickets.RESOLVE_ACTION, nth=1)  # press the newer message's button
+    assert not any(tickets.has_buttons(m.get("blocks")) for m in slack.threads[ts])
+    assert sorted(update["ts"] for update in slack.calls_to("chat_update")) == sorted(with_buttons)
+    assert tickets.find_ticket(slack.threads[ts], BOT_USER_ID).key == "IT-1"  # ticket message text untouched
+
+
+def test_one_failed_button_removal_doesnt_stop_the_rest(desk, slack, jira):
+    ts = post(desk, slack, "VPN won't connect")
+    reply(desk, slack, ts, "Still failing")
+    first, second = [m for m in slack.threads[ts] if tickets.has_buttons(m.get("blocks"))]
+    slack.fail_updates = {first["ts"]}
+
+    click(desk, slack, ts, tickets.ESCALATE_ACTION, nth=1)
+    assert "escalated" in jira.issues["IT-1"]["labels"]
+    assert tickets.has_buttons(first["blocks"]) and not tickets.has_buttons(second["blocks"])
 
 
 def test_resolve_explains_when_the_workflow_has_no_done_transition(desk, slack, jira):
@@ -410,11 +447,13 @@ def test_resolve_explains_when_the_workflow_has_no_done_transition(desk, slack, 
 
 def test_escalate_labels_the_ticket_and_mentions_the_it_team(desk, slack, jira):
     ts = post(desk, slack, "VPN won't connect")
+    stale = button_body(slack, ts, tickets.ESCALATE_ACTION)
     click(desk, slack, ts, tickets.ESCALATE_ACTION)
 
     assert "escalated" in jira.issues["IT-1"]["labels"]
     assert "<!subteam^SIT> will take it from here" in last_post(slack)["text"]
-    click(desk, slack, ts, tickets.ESCALATE_ACTION)
+    assert not any(tickets.has_buttons(m.get("blocks")) for m in slack.threads[ts])
+    desk.on_button(stale, desk.escalate)
     assert "already been escalated" in slack.calls_to("chat_postEphemeral")[-1]["text"]
 
 
