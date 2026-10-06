@@ -91,11 +91,14 @@ _SMALL_TALK_WORDS = {
     "team", "all", "everyone", "anyone", "folks", "guys", "y'all", "there", "it", "support", "helpdesk",
     "quick", "question", "i", "have", "got", "a", "need", "some", "help", "please", "pls", "can", "you",
     "someone", "around", "here", "is", "are",
+    # "I have a problem", "having an issue", "something is wrong", "it's not working": a problem, but no details yet
+    "an", "with", "my", "problem", "problems", "issue", "issues", "trouble", "something", "something's", "wrong",
+    "having", "it's", "its", "this", "not", "working", "broken", "doesn't", "work", "there's",
 }
 
 
 def is_small_talk(text):
-    """True for posts with no details yet, like "Hi team", "quick question" or "I need help"."""
+    """True for posts with no details yet, like "Hi team", "quick question" or "I have a problem"."""
     text = re.sub(r":[a-z0-9_+'-]+:", " ", text.lower())  # Slack emoji codes such as :wave:
     words = re.findall(r"[a-z']+", text)
     return len(words) <= 6 and all(word in _SMALL_TALK_WORDS for word in words)

@@ -18,7 +18,8 @@ ESCALATED_LABEL = "escalated"
 CATEGORY_LABEL_PREFIX = "category-"
 
 _TICKET_TEXT = re.compile(r"Ticket ([A-Z][A-Z0-9_]*-\d+) created")
-_LINKED_TEXT = re.compile(r"Added to ticket ([A-Z][A-Z0-9_]*-\d+)")
+# The key may be plain ("IT-6") or a Slack link ("<https://…/browse/IT-6|IT-6>"), the format used since #28.
+_LINKED_TEXT = re.compile(r"Added to ticket (?:<[^|>]+\|)?([A-Z][A-Z0-9_]*-\d+)")
 _DETAILS_PROMPT = re.compile(r"Hi <@\w+>! What's going on\?")
 _SECTION_LIMIT = 2900  # Slack allows 3,000 characters in a section block
 
@@ -81,6 +82,10 @@ def reply_blocks(text, ticket):
     return [_section(text), _buttons(ticket)]
 
 
+def has_buttons(blocks):
+    return any(block.get("type") == "actions" for block in blocks or [])
+
+
 def without_buttons(blocks):
     return [block for block in blocks if block.get("type") != "actions"]
 
@@ -111,9 +116,9 @@ def awaiting_details(messages, bot_user_id, author):
     )
 
 
-def linked_text(key, thread_permalink):
+def linked_text(key, ticket_url, thread_permalink):
     """The bot's reply to an extra post that was added to an existing ticket. find_linked_ticket() reads it."""
-    return f"Added to ticket {key}: <{thread_permalink}|continue in the ticket thread>"
+    return f"Added to ticket <{ticket_url}|{key}>: <{thread_permalink}|continue in the ticket thread>"
 
 
 def find_linked_ticket(messages, bot_user_id):

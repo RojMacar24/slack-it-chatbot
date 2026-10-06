@@ -2,6 +2,8 @@
 
 import copy
 
+from slack_sdk.errors import SlackApiError
+
 from assistant import keyword_triage
 from config import load_config
 from jira_client import JiraError
@@ -52,7 +54,14 @@ class FakeSlack:
         return {"ok": True}
 
     def chat_update(self, **kwargs):
+        """Edits the stored message, like Slack does. Raises for any ts in `fail_updates`."""
         self.calls.append(("chat_update", kwargs))
+        if kwargs["ts"] in getattr(self, "fail_updates", ()):
+            raise SlackApiError("cant_update_message", {"ok": False, "error": "cant_update_message"})
+        for messages in self.threads.values():
+            for message in messages:
+                if message["ts"] == kwargs["ts"]:
+                    message.update(text=kwargs["text"], blocks=kwargs.get("blocks"))
         return {"ok": True}
 
     def chat_getPermalink(self, channel, message_ts):

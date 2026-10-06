@@ -151,14 +151,24 @@ class HelpDesk:
             self._ephemeral(channel, user, ticket, problem)
             return
         self.slack.chat_postMessage(channel=channel, thread_ts=ticket.thread_ts, text=announcement)
-        message = body.get("message") or {}
-        if message.get("blocks"):
-            self.slack.chat_update(
-                channel=channel,
-                ts=body["container"]["message_ts"],
-                text=message.get("text", ""),
-                blocks=tickets.without_buttons(message["blocks"]),
-            )
+        self._remove_buttons(channel, ticket.thread_ts)
+
+    def _remove_buttons(self, channel, thread_ts):
+        """Take the buttons off every bot message in the thread, so a closed or escalated ticket no longer looks
+        like it's waiting for a click. Message text is kept, because find_ticket() relies on it."""
+        try:
+            messages = self.slack.conversations_replies(channel=channel, ts=thread_ts, limit=200)["messages"]
+        except SlackApiError as exc:
+            logger.warning("Couldn't read thread %s to remove its buttons: %s", thread_ts, exc)
+            return
+        for message in messages:
+            if message.get("user") != self.bot_user_id or not tickets.has_buttons(message.get("blocks")):
+                continue
+            try:
+                self.slack.chat_update(channel=channel, ts=message["ts"], text=message.get("text", ""),
+                                       blocks=tickets.without_buttons(message["blocks"]))
+            except SlackApiError as exc:
+                logger.warning("Couldn't remove the buttons from message %s: %s", message["ts"], exc)
 
     # --- Ticket lifecycle --------------------------------------------------------------------------------------
 
@@ -203,8 +213,13 @@ class HelpDesk:
         self._comment(ticket.key, f"{self._jira_name(user)} added in a separate Slack post:\n"
                       + noformat(text or f"(No text. Attachments in Slack: {len(files)})"))
         thread_link = self._permalink(channel, ticket.thread_ts) or self.jira.browse_url(ticket.key)
-        self.slack.chat_postMessage(channel=channel, thread_ts=ts, text=tickets.linked_text(ticket.key, thread_link),
-                                    unfurl_links=False, unfurl_media=False)
+        self.slack.chat_postMessage(
+            channel=channel,
+            thread_ts=ts,
+            text=tickets.linked_text(ticket.key, self.jira.browse_url(ticket.key), thread_link),
+            unfurl_links=False,
+            unfurl_media=False,
+        )
         if text:
             with self._thread_locks(ticket.thread_ts):
                 messages = self.slack.conversations_replies(channel=channel, ts=ticket.thread_ts, limit=200)["messages"]
