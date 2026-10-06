@@ -6,7 +6,7 @@
 each ticket up to date with the Slack conversation until the problem is solved.**
 
 <p align="center">
-  <img src="docs/demo.gif" width="732" alt="Demo: a Slack post becomes Jira ticket IT-9 with AI troubleshooting steps. The requester replies, gets a follow-up, presses That fixed it, and the ticket shows as Done in Jira with the conversation copied in as comments.">
+  <img src="docs/demo.gif" width="560" alt="Demo: a Slack post becomes Jira ticket IT-9 with AI troubleshooting steps. The requester replies, gets a follow-up, presses That fixed it, and the ticket shows as Done in Jira with the conversation copied in as comments.">
 </p>
 <p align="center"><em>A real run in a lab Slack workspace and Jira Cloud site, with the waiting time sped up.</em></p>
 
