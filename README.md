@@ -1,6 +1,6 @@
 # Slack + Jira IT Help Desk Bot
 
-[![tests](https://github.com/Roj-D0nut/slack-it-chatbot/actions/workflows/tests.yml/badge.svg)](https://github.com/Roj-D0nut/slack-it-chatbot/actions/workflows/tests.yml)
+[![tests](https://github.com/RojMacar24/slack-it-chatbot/actions/workflows/tests.yml/badge.svg)](https://github.com/RojMacar24/slack-it-chatbot/actions/workflows/tests.yml)
 
 **A Slack bot that turns IT requests into triaged Jira tickets, answers with first-line troubleshooting, and keeps
 each ticket up to date with the Slack conversation until the problem is solved.**
@@ -232,7 +232,7 @@ See [SECURITY.md](SECURITY.md) for how data and credentials are handled.
 
 ## Author and copyright
 
-Built by Rojie M. ([@Roj-D0nut](https://github.com/Roj-D0nut)).
+Built by Rojie M. ([@RojMacar24](https://github.com/RojMacar24)).
 
 © 2026 Rojie M. All rights reserved. No license is granted to copy, modify or redistribute this code. You're welcome to
 read it; please ask before reusing any of it.
