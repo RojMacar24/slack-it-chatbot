@@ -121,7 +121,7 @@ In your IT channel:
 | `JIRA_SET_PRIORITY` | | `true` | The bot retries without a priority if Jira rejects it |
 | `JIRA_DONE_TRANSITION` | | | Exact transition name for "That fixed it", if the automatic choice is wrong |
 | `OPENAI_API_KEY` | | | Turns on AI triage and replies |
-| `OPENAI_MODEL` | | `gpt-4o-mini` | Any chat model that supports JSON mode |
+| `OPENAI_MODEL` | | `gpt-6-luna` | Any chat model that supports JSON mode |
 | `AI_ALLOWED_LINK_DOMAINS` | | | Comma-separated. If set, links in AI replies to other domains are removed |
 | `IT_ENVIRONMENT_FILE` | | `it_environment.md` | Context for the AI |
 | `ESCALATION_MENTION` | | "The IT team" | `<@U…>` or `<!subteam^S…>` to ping on escalation |

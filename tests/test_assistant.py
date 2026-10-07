@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from assistant import Assistant, Triage, is_small_talk, keyword_triage
+from assistant import Assistant, CutOffAnswer, Triage, is_small_talk, keyword_triage
 
 
 @pytest.mark.parametrize("text", [
@@ -58,15 +58,16 @@ def test_keyword_triage_priority_and_summary():
 class FakeOpenAI:
     """Mimics client.chat.completions.create and records the calls."""
 
-    def __init__(self, content=None, error=None):
-        self.content, self.error, self.calls = content, error, []
+    def __init__(self, content=None, error=None, finish_reason="stop"):
+        self.content, self.error, self.finish_reason, self.calls = content, error, finish_reason, []
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
     def _create(self, **kwargs):
         self.calls.append(kwargs)
         if self.error:
             raise self.error
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=self.content))])
+        choice = SimpleNamespace(message=SimpleNamespace(content=self.content), finish_reason=self.finish_reason)
+        return SimpleNamespace(choices=[choice])
 
 
 def test_assess_uses_the_model_answer():
@@ -102,6 +103,30 @@ def test_assess_drops_reply_for_requests():
 def test_assess_survives_model_failures(client):
     triage, reply = Assistant(client=client).assess("Printer is jammed")
     assert triage == keyword_triage("Printer is jammed") and reply == ""
+
+
+def test_default_model_and_token_limits():
+    client = FakeOpenAI(json.dumps({"kind": "incident", "category": "network", "priority": "High",
+                                    "summary": "VPN down", "reply": "Try this."}))
+    assistant = Assistant(client=client)
+    assert assistant.model == "gpt-6-luna"
+    assistant.assess("VPN down")
+    assistant.follow_up("IT-1", [{"role": "user", "content": "Still down"}])
+    assert [(call["model"], call["max_completion_tokens"]) for call in client.calls] == [
+        ("gpt-6-luna", 2000), ("gpt-6-luna", 1500)]
+
+
+def test_cut_off_triage_falls_back_to_keyword_rules():
+    # A cut-off JSON answer can still parse if it's cut between fields, so the finish reason decides, not json.loads
+    client = FakeOpenAI(json.dumps({"kind": "change-request", "category": "other", "priority": "Low",
+                                    "summary": "Partial", "reply": ""}), finish_reason="length")
+    assert Assistant(client=client).assess("VPN won't connect") == (keyword_triage("VPN won't connect"), "")
+
+
+def test_cut_off_follow_up_is_never_returned():
+    client = FakeOpenAI("1. Restart the VPN client. 2. Check your", finish_reason="length")
+    with pytest.raises(CutOffAnswer, match="gpt-6-luna ran out of room after 1500 tokens"):
+        Assistant(client=client).follow_up("IT-7", [{"role": "user", "content": "Still failing"}])
 
 
 def test_openai_client_gives_up_quickly():

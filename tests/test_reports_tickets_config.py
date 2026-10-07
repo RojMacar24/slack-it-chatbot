@@ -102,6 +102,8 @@ def test_config_defaults_and_environment_notes():
     assert config.jira_base_url == "https://jira.example"
     assert config.jira_request_issue_type == "Task"
     assert config.openai_api_key is None
+    assert config.openai_model == "gpt-6-luna"
+    assert make_config(OPENAI_MODEL="gpt-6.1-sol").openai_model == "gpt-6.1-sol"
     assert config.max_ai_follow_ups == 3
     assert config.merge_window_seconds == 120
     assert config.jira_done_transition is None
