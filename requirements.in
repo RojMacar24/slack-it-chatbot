@@ -1,7 +1,7 @@
 # Version ranges the bot accepts. requirements.txt is generated from this file with exact versions and hashes:
 #   uvx --from pip-tools pip-compile --generate-hashes --allow-unsafe --strip-extras --output-file requirements.txt requirements.in
 slack-bolt>=1.18,<2
-openai>=1.54,<3
+openai>=3.24.0,<4
 requests>=2.31,<3
 python-dotenv>=1.0,<2
 APScheduler>=3.10,<4
