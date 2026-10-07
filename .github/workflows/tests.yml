@@ -10,7 +10,15 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Linux and Windows, because lock files compiled on one can be missing packages the other needs (#40)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       # Actions are pinned to full commit SHAs, because tags can be moved. Dependabot keeps them up to date.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

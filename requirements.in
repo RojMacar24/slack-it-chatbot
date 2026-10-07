@@ -5,3 +5,6 @@ openai>=1.54,<3
 requests>=2.31,<3
 python-dotenv>=1.0,<2
 APScheduler>=3.10,<4
+# Windows has no built-in time-zone database, so zoneinfo and APScheduler need this package there. It's listed
+# explicitly because lock files compiled on Linux (by Dependabot, for example) would otherwise leave it out.
+tzdata>=2024.1
