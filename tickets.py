@@ -23,6 +23,9 @@ _LINKED_TEXT = re.compile(r"Added to ticket (?:<[^|>]+\|)?([A-Z][A-Z0-9_]*-\d+)"
 _DETAILS_PROMPT = re.compile(r"Hi <@\w+>! What's going on\?")
 _SECTION_LIMIT = 2900  # Slack allows 3,000 characters in a section block
 
+SECRET_WARNING = (":lock: Your message looks like it contains a password or key. I kept it out of the ticket, "
+                  "but please delete it from Slack and change it.")
+
 
 @dataclass(frozen=True)
 class TicketRef:
@@ -59,10 +62,7 @@ def ticket_blocks(ticket, url, triage, reply, secret_removed=False):
         ),
     ]
     if secret_removed:
-        blocks.append(_section(
-            ":lock: Your message looks like it contains a password or key. I kept it out of the ticket, "
-            "but please delete it from Slack and change it."
-        ))
+        blocks.append(_section(SECRET_WARNING))
     if reply:
         blocks.append(_section(reply))
     elif triage.kind == "incident":
