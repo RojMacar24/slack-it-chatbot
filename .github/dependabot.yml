@@ -1,0 +1,19 @@
+# Weekly pull requests to keep dependencies current. Each one runs the tests before it can be merged.
+# Security alerts and security-fix pull requests are turned on separately, in the repository settings.
+version: 2
+updates:
+  # Python: updates the version ranges in requirements*.in and regenerates the pinned, hashed requirements*.txt
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python-dependencies:
+        patterns: ["*"]
+
+  # GitHub Actions: moves the pinned commit SHAs (and their version comments) to new releases
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

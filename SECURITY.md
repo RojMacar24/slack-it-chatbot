@@ -57,6 +57,17 @@ The bot only acts on messages in the configured channel. Only the person who ope
   completely, so treat AI replies as suggestions.
 - The AI stops replying after `MAX_AI_FOLLOW_UPS` replies, which also caps cost per ticket.
 
+## Dependencies and CI
+
+- **Locked dependencies:** `requirements.in` and `requirements-dev.in` hold the accepted version ranges.
+  `requirements.txt` and `requirements-dev.txt` are generated from them with `pip-compile --generate-hashes`, so
+  every package is pinned to an exact version and checked against its SHA-256 hash when it's installed.
+- **Pinned GitHub Actions:** the workflow references each action by its full commit SHA, not a tag that could be moved.
+- **Dependabot:** security alerts and security-fix pull requests are on, and `.github/dependabot.yml` opens weekly
+  update pull requests for Python packages and GitHub Actions.
+- **CI:** every push to `main` and every pull request installs with `--require-hashes`, then runs `pyflakes` and the
+  test suite. The workflow can only read the repository, and it doesn't keep the checkout credentials.
+
 ## Reporting a problem
 
 If you find a security issue in this project, report it privately to the repository owner, for example through a
