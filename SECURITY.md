@@ -22,8 +22,10 @@ This is a lab project. Review it before pointing it at a production Slack worksp
 
 The bot has no database. Before text is sent to Jira or OpenAI, it masks anything that looks like a secret:
 `password: …`-style values, Slack tokens and webhook URLs, OpenAI-style keys, Atlassian API tokens, AWS access key
-IDs, Google API keys, GitHub tokens, JWTs, `Bearer` tokens and private keys. The requester is then asked to delete
-the message and change the secret. This is best-effort pattern matching, so tell users never to post credentials.
+IDs, Google API keys, GitHub tokens, JWTs, `Bearer` tokens and private keys. Whoever posted it, in a new post, a
+thread reply or an extra post added to a ticket, is then asked to delete the message and change the secret. In a
+reply, that request is a private message only they can see. This is best-effort pattern matching, so tell users
+never to post credentials.
 
 Message text goes into Jira inside a `{noformat}` block, so Jira shows it as written. Slack display names are
 stripped of Jira's link and formatting characters first, because anyone can set their display name to Jira markup.

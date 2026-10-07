@@ -137,18 +137,18 @@ class HelpDesk:
         user = body["user"]["id"]
         channel = body["channel"]["id"]
         if user != ticket.creator:
-            self._ephemeral(channel, user, ticket,
+            self._ephemeral(channel, user, ticket.thread_ts,
                             f"Only <@{ticket.creator}> can use these buttons. IT staff can update {ticket.key} in Jira.")
             return
         try:
             announcement, problem = action(ticket, user)
         except JiraError as exc:
             logger.error("Jira rejected a button action on %s: %s", ticket.key, exc)
-            self._ephemeral(channel, user, ticket, f":warning: Jira didn't accept that change to {ticket.key}. "
-                                                   "The IT team can see the details in the bot's log.")
+            self._ephemeral(channel, user, ticket.thread_ts, f":warning: Jira didn't accept that change to "
+                                                             f"{ticket.key}. The IT team can see the details in the bot's log.")
             return
         if problem:
-            self._ephemeral(channel, user, ticket, problem)
+            self._ephemeral(channel, user, ticket.thread_ts, problem)
             return
         self.slack.chat_postMessage(channel=channel, thread_ts=ticket.thread_ts, text=announcement)
         self._remove_buttons(channel, ticket.thread_ts)
@@ -205,7 +205,7 @@ class HelpDesk:
     def _add_post_to_ticket(self, ticket, event):
         """A post moments after the same person's last ticket is probably more of the same story, so add it there."""
         channel, ts, user = event["channel"], event["ts"], event["user"]
-        text = self._clean(event.get("text", ""))
+        text = self._clean_and_warn(event, ts)
         files = event.get("files") or []
         if not text and not files:
             return
@@ -296,7 +296,7 @@ class HelpDesk:
             if ticket is None:
                 self._reply_without_ticket(event, messages)
                 return
-            text = self._clean(event.get("text", ""))
+            text = self._clean_and_warn(event, thread_ts)
             if text:
                 self._comment(ticket.key, f"{self._jira_name(author)} replied in Slack:\n" + noformat(text))
             if author == ticket.creator:
@@ -320,8 +320,10 @@ class HelpDesk:
                 self._remember(author, ticket, event["ts"])
             return
         key = tickets.find_linked_ticket(messages, self.bot_user_id)
-        text = self._clean(event.get("text", ""))
-        if key and text:
+        if not key:
+            return
+        text = self._clean_and_warn(event, thread_ts)
+        if text:
             self._comment(key, f"{self._jira_name(author)} replied in Slack:\n" + noformat(text))
 
     def _ai_follow_up(self, channel, ticket, messages, new_text, new_ts):
@@ -409,6 +411,15 @@ class HelpDesk:
     def _clean(self, text):
         return redact_secrets(slack_to_plain(text, self.user_name))
 
+    def _clean_and_warn(self, event, thread_ts):
+        """The message's text with secrets masked. If anything was masked, privately ask its author to delete the
+        message and change the secret: the bot keeps it out of Jira and the AI, but it's still visible in Slack."""
+        plain = slack_to_plain(event.get("text", ""), self.user_name)
+        text = redact_secrets(plain)
+        if text != plain:
+            self._ephemeral(event["channel"], event["user"], thread_ts, tickets.SECRET_WARNING)
+        return text
+
     def _jira_name(self, user_id):
         """A Slack display name made safe for Jira, since anyone can set their display name to Jira markup."""
         return safe_inline(self.user_name(user_id))
@@ -441,8 +452,9 @@ class HelpDesk:
         except JiraError as exc:
             logger.warning("Couldn't add a comment to %s: %s", key, exc)
 
-    def _ephemeral(self, channel, user, ticket, text):
-        self.slack.chat_postEphemeral(channel=channel, user=user, thread_ts=ticket.thread_ts, text=text)
+    def _ephemeral(self, channel, user, thread_ts, text):
+        """A message in the thread that only `user` can see."""
+        self.slack.chat_postEphemeral(channel=channel, user=user, thread_ts=thread_ts, text=text)
 
     def _permalink(self, channel, ts):
         try:

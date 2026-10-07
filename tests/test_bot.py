@@ -377,6 +377,51 @@ def test_display_names_cant_inject_jira_markup(desk, slack, jira):
     assert not any(char in header for header in comment_headers for char in "[]|")
 
 
+def warnings_to(slack, user):
+    return [call for call in slack.calls_to("chat_postEphemeral")
+            if call["user"] == user and call["text"] == tickets.SECRET_WARNING]
+
+
+@pytest.mark.parametrize("author", [REQUESTER, ENGINEER])
+def test_secret_in_a_thread_reply_is_masked_and_its_author_warned_privately(desk, slack, jira, ai, author):
+    ts = post(desk, slack, "VPN won't connect")
+    reply(desk, slack, ts, "my password: Hunter2! still fails", user=author)
+
+    [warning] = warnings_to(slack, author)
+    assert warning["thread_ts"] == ts
+    assert not any("Hunter2" in body for _, body in jira.comments)
+    assert not any("Hunter2" in m["content"] for history in ai.histories for m in history)
+    assert not any("Hunter2" in call["text"] for call in slack.calls_to("chat_postMessage"))
+
+
+def test_secret_in_an_extra_post_is_masked_and_its_author_warned_privately(desk, slack, jira):
+    post(desk, slack, "VPN won't connect")
+    second = post(desk, slack, "token: xoxb-1234567890-abcdefghij")
+
+    [warning] = warnings_to(slack, REQUESTER)
+    assert warning["thread_ts"] == second
+    assert not any("xoxb-1234567890" in body for _, body in jira.comments)
+
+
+def test_secret_in_a_reply_under_an_extra_post_is_masked_and_its_author_warned(desk, slack, jira):
+    post(desk, slack, "VPN won't connect")
+    second = post(desk, slack, "It shows error 809")
+    reply(desk, slack, second, "pin=4321 is what I typed")
+
+    [warning] = warnings_to(slack, REQUESTER)
+    assert warning["thread_ts"] == second
+    assert ("IT-1", "UREQ replied in Slack:\n{noformat}\npin=[redacted] is what I typed\n{noformat}") in jira.comments
+
+
+def test_no_secret_no_warning(desk, slack, jira):
+    ts = post(desk, slack, "VPN won't connect")
+    reply(desk, slack, ts, "my password is expired, I think")
+    unrelated = slack.next_ts()
+    slack.threads[unrelated] = [{"ts": unrelated, "user": ENGINEER, "text": "Lunch?"}]
+    reply(desk, slack, unrelated, "password: not-for-the-bot", user=REQUESTER)  # not a ticket thread: none of our business
+    assert slack.calls_to("chat_postEphemeral") == []
+
+
 def test_ai_links_outside_the_allowlist_are_removed(slack, jira):
     ai = FakeAssistant(first_reply="Reset it [on the portal](https://evil.example/login), or see "
                                    "https://support.microsoft.com/vpn")
