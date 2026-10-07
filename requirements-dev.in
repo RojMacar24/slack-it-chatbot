@@ -3,3 +3,5 @@
 -r requirements.in
 pytest>=8
 pyflakes>=3
+# pytest needs colorama on Windows; listed so lock files compiled on Linux keep it (see requirements.in).
+colorama>=0.4
