@@ -1,0 +1,5 @@
+# Version ranges for development. requirements-dev.txt is generated from this file; see requirements.in.
+-c requirements.txt
+-r requirements.in
+pytest>=8
+pyflakes>=3
