@@ -40,6 +40,7 @@ class Config:
     escalation_mention: str | None
     max_ai_follow_ups: int
     merge_window_seconds: int
+    max_tickets_per_hour: int
     report_enabled: bool
     report_day: str
     report_hour: int
@@ -92,6 +93,10 @@ def load_config(env=None) -> Config:
         raise ConfigError("JIRA_BASE_URL must start with https:// (for example https://your-site.atlassian.net), "
                           "so the Jira API token is encrypted on its way to Jira.")
 
+    max_tickets_per_hour = number("MAX_TICKETS_PER_HOUR", 10)
+    if max_tickets_per_hour < 0:
+        raise ConfigError("MAX_TICKETS_PER_HOUR must be 0 (no limit) or more.")
+
     report_enabled = flag("REPORT_ENABLED", True)
     report_day = get("REPORT_DAY", "mon")
     report_hour = number("REPORT_HOUR", 9)
@@ -120,6 +125,7 @@ def load_config(env=None) -> Config:
         escalation_mention=get("ESCALATION_MENTION"),
         max_ai_follow_ups=number("MAX_AI_FOLLOW_UPS", 3),
         merge_window_seconds=number("MERGE_WINDOW_SECONDS", 120),
+        max_tickets_per_hour=max_tickets_per_hour,
         report_enabled=report_enabled,
         report_day=report_day,
         report_hour=report_hour,

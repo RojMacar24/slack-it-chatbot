@@ -127,6 +127,7 @@ In your IT channel:
 | `ESCALATION_MENTION` | | "The IT team" | `<@U…>` or `<!subteam^S…>` to ping on escalation |
 | `MAX_AI_FOLLOW_UPS` | | `3` | AI replies per ticket after the first answer |
 | `MERGE_WINDOW_SECONDS` | | `120` | Extra posts from the same person within this time join their last ticket. `0` turns it off |
+| `MAX_TICKETS_PER_HOUR` | | `10` | Tickets one person can open per hour. Past that, the bot asks them to use an open ticket. `0` turns the limit off |
 | `REPORT_ENABLED` / `REPORT_DAY` / `REPORT_HOUR` / `REPORT_TIMEZONE` | | `true` / `mon` / `9` / `UTC` | Weekly report schedule |
 
 ## Deploying

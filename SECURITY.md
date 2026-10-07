@@ -69,6 +69,28 @@ The bot only acts on messages in the configured channel. Only the person who ope
   update pull requests for Python packages and GitHub Actions.
 - **CI:** every push to `main` and every pull request installs with `--require-hashes`, then runs `pyflakes` and the
   test suite. The workflow can only read the repository, and it doesn't keep the checkout credentials.
+- **Linux and Windows:** CI runs on both, because a lock file compiled on one operating system can leave out packages
+  the other needs.
+
+## Known limitations
+
+What the bot doesn't protect against, or only partly:
+
+- **Secret masking is pattern-based.** It catches the common formats listed above, not every secret. A secret stays
+  visible in the Slack message until its author deletes it; the bot can only ask them to.
+- **Prompt injection is reduced, not prevented.** The model has no tools and its output is escaped, with links shown
+  in full (or limited to `AI_ALLOWED_LINK_DOMAINS`). A crafted message can still steer what the AI *says*, so treat
+  replies as suggestions.
+- **Limits live in memory.** The ticket limit (`MAX_TICKETS_PER_HOUR`) and the merge window reset when the bot
+  restarts, and only work if one copy of the bot runs. They slow down spam; they don't stop a determined attacker.
+  Prepaid OpenAI credit with auto-recharge off is the hard cap on AI spending.
+- **The bot can't tell IT staff from coworkers.** A reply from anyone other than the requester stops the AI (#7).
+- **Changes made in Jira don't reach Slack** (#6). Closing a ticket in Jira doesn't update its Slack thread.
+- **Every ticket is reported by the bot's Jira account** (#9). The requester's name is in the description.
+- **Jira and OpenAI keep what they're sent** under their own retention policies. Data already sent can't be
+  recalled by the bot.
+- **The Jira token can do whatever its account can.** Use a dedicated Jira account that's a member of the IT space
+  only, not an administrator.
 
 ## Reporting a problem
 

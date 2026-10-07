@@ -109,6 +109,10 @@ those and nothing else.
 
 Everyone's replies are still copied to Jira.
 
+**Limits.** One person can open up to `MAX_TICKETS_PER_HOUR` tickets an hour (10 by default). Past that, the bot asks
+them to add to an open ticket instead, before any AI or Jira call is made. Extra posts merged into a ticket and
+greeting prompts don't count.
+
 **Buttons.** Only the requester can use them. Anyone else gets a private note saying so. To close a ticket, the bot
 picks a transition into a Done-category status, preferring names like Done, Resolve or Close. It never uses
 cancel-style transitions ("Cancel", "Won't do", "Duplicate"). If the transition asks for a resolution, it fills in
