@@ -10,7 +10,7 @@ from slack_bolt.request import BoltRequest
 from slack_sdk.errors import SlackApiError
 
 import tickets
-from assistant import Assistant
+from assistant import Assistant, CutOffAnswer
 from bot import HelpDesk, check_channel_access, is_report_command, resolve_channel_id, schedule_weekly_report
 from config import ConfigError
 from fakes import BOT_USER_ID, CHANNEL_ID, FakeAssistant, FakeJira, FakeSlack, make_config
@@ -326,6 +326,21 @@ def test_reply_sent_while_the_ticket_is_being_created_is_not_lost(slack, jira):
     assert not opener.is_alive() and not replier.is_alive()
     assert ("IT-1", "UREQ replied in Slack:\n{noformat}\nIt started after the update\n{noformat}") in jira.comments
     assert len(ai.histories) == 1
+
+
+def test_a_cut_off_ai_answer_is_not_posted(slack, jira, caplog):
+    class CutOffAssistant(FakeAssistant):
+        def follow_up(self, issue_key, history):
+            raise CutOffAnswer("gpt-6-luna ran out of room after 1500 tokens, so its answer is incomplete.")
+
+    desk = HelpDesk(make_config(), slack, jira, CutOffAssistant(), BOT_USER_ID, CHANNEL_ID)
+    ts = post(desk, slack, "VPN won't connect")
+    posts_before = len(slack.calls_to("chat_postMessage"))
+    reply(desk, slack, ts, "Still failing")
+
+    assert len(slack.calls_to("chat_postMessage")) == posts_before  # nothing half-finished goes to Slack
+    assert "Not posting a follow-up for IT-1" in caplog.text
+    assert ("IT-1", "UREQ replied in Slack:\n{noformat}\nStill failing\n{noformat}") in jira.comments
 
 
 def test_quick_replies_get_one_answer_covering_both(desk, slack, jira, ai):

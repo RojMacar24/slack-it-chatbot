@@ -19,7 +19,7 @@ from slack_sdk.errors import SlackApiError
 
 import reports
 import tickets
-from assistant import Assistant, is_small_talk
+from assistant import Assistant, CutOffAnswer, is_small_talk
 from config import ConfigError, load_config
 from jira_client import JiraClient, JiraError, is_done, noformat, safe_inline
 from text_utils import redact_secrets, slack_to_plain, to_slack_mrkdwn
@@ -357,6 +357,9 @@ class HelpDesk:
             history.append({"role": "user", "content": new_text})  # a merged extra post, or not indexed by Slack yet
         try:
             answer = self.assistant.follow_up(ticket.key, history)
+        except CutOffAnswer as exc:
+            logger.warning("Not posting a follow-up for %s: %s", ticket.key, exc)
+            return
         except Exception:
             logger.exception("AI follow-up failed for %s", ticket.key)
             return

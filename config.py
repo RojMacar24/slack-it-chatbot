@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 
+from assistant import DEFAULT_MODEL
+
 PROJECT_DIR = Path(__file__).resolve().parent
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
@@ -112,7 +114,7 @@ def load_config(env=None) -> Config:
         jira_set_priority=flag("JIRA_SET_PRIORITY", True),
         jira_done_transition=get("JIRA_DONE_TRANSITION"),
         openai_api_key=get("OPENAI_API_KEY"),
-        openai_model=get("OPENAI_MODEL", "gpt-4o-mini"),
+        openai_model=get("OPENAI_MODEL", DEFAULT_MODEL),
         ai_allowed_link_domains=_domain_list(get("AI_ALLOWED_LINK_DOMAINS", "")),
         it_environment=_read_environment_notes(get("IT_ENVIRONMENT_FILE", "it_environment.md")),
         escalation_mention=get("ESCALATION_MENTION"),

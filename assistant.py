@@ -162,9 +162,19 @@ IT environment notes:
 OPENAI_TIMEOUT_SECONDS = 15
 OPENAI_MAX_RETRIES = 1
 
+DEFAULT_MODEL = "gpt-6-luna"
+# Upper limits on answer length. Newer models "think" before answering, and that thinking counts towards these limits,
+# so they're set well above what a reply needs. Only tokens actually used are billed.
+TRIAGE_MAX_TOKENS = 2000
+FOLLOW_UP_MAX_TOKENS = 1500
+
+
+class CutOffAnswer(Exception):
+    """The model hit the token limit before finishing, so its answer is incomplete and mustn't be used."""
+
 
 class Assistant:
-    def __init__(self, api_key=None, model="gpt-4o-mini", environment="", client=None):
+    def __init__(self, api_key=None, model=DEFAULT_MODEL, environment="", client=None):
         if client is None and api_key:
             client = OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT_SECONDS, max_retries=OPENAI_MAX_RETRIES)
         self._client = client
@@ -189,10 +199,13 @@ class Assistant:
         try:
             raw = self._complete(
                 [{"role": "system", "content": prompt}, {"role": "user", "content": text}],
-                max_tokens=1000,
+                max_tokens=TRIAGE_MAX_TOKENS,
                 json_mode=True,
             )
             data = json.loads(raw)
+        except CutOffAnswer as exc:
+            logger.warning("%s Falling back to keyword rules.", exc)
+            return fallback, ""
         except Exception:
             logger.exception("AI triage failed, falling back to keyword rules")
             return fallback, ""
@@ -211,9 +224,12 @@ class Assistant:
         return triage, reply.strip()
 
     def follow_up(self, issue_key, history):
-        """Next reply in a ticket thread. `history` is a list of {"role", "content"} messages, oldest first."""
+        """Next reply in a ticket thread. `history` is a list of {"role", "content"} messages, oldest first.
+
+        Raises CutOffAnswer rather than returning a half-finished reply.
+        """
         prompt = _FOLLOW_UP_PROMPT.format(key=issue_key, rules=_REPLY_RULES, environment=self.environment)
-        return self._complete([{"role": "system", "content": prompt}, *history], max_tokens=700)
+        return self._complete([{"role": "system", "content": prompt}, *history], max_tokens=FOLLOW_UP_MAX_TOKENS)
 
     def _complete(self, messages, max_tokens, json_mode=False):
         extra = {"response_format": {"type": "json_object"}} if json_mode else {}
@@ -223,7 +239,10 @@ class Assistant:
             max_completion_tokens=max_tokens,
             **extra,
         )
-        return (response.choices[0].message.content or "").strip()
+        choice = response.choices[0]
+        if choice.finish_reason == "length":
+            raise CutOffAnswer(f"{self.model} ran out of room after {max_tokens} tokens, so its answer is incomplete.")
+        return (choice.message.content or "").strip()
 
 
 def _choose(value, allowed, default, normalize):
