@@ -448,6 +448,57 @@ def test_jira_errors_arent_shown_to_users(desk, slack, jira):
     assert "couldn't build the report" in report and "jira.internal" not in report
 
 
+# --- Ticket limit ----------------------------------------------------------------------------------------------
+
+def desk_with(slack, jira, ai, **overrides):
+    return HelpDesk(make_config(**overrides), slack, jira, ai, BOT_USER_ID, CHANNEL_ID)
+
+
+def test_ticket_limit_blocks_the_next_ticket_until_an_hour_has_passed(slack, jira, ai):
+    desk = desk_with(slack, jira, ai, MAX_TICKETS_PER_HOUR="2", MERGE_WINDOW_SECONDS="0")
+    post(desk, slack, "VPN won't connect")
+    post(desk, slack, "Printer is jammed")
+    blocked = post(desk, slack, "Outlook keeps crashing")
+
+    assert len(jira.created) == 2 and len(ai.assessed) == 2  # the blocked post never reached the AI
+    assert last_post(slack)["thread_ts"] == blocked
+    assert last_post(slack)["text"].startswith(":hourglass: You've opened 2 tickets in the last hour")
+
+    slack._clock += 3600
+    post(desk, slack, "Outlook keeps crashing")
+    assert len(jira.created) == 3
+
+
+def test_ticket_limit_zero_means_no_limit(slack, jira, ai):
+    desk = desk_with(slack, jira, ai, MAX_TICKETS_PER_HOUR="0", MERGE_WINDOW_SECONDS="0")
+    for n in range(12):
+        post(desk, slack, f"Printer number {n} is jammed")
+    assert len(jira.created) == 12
+
+
+def test_merged_posts_and_greetings_dont_count_towards_the_limit(slack, jira, ai):
+    desk = desk_with(slack, jira, ai, MAX_TICKETS_PER_HOUR="2")
+    post(desk, slack, "VPN won't connect")             # ticket 1
+    post(desk, slack, "It shows error 809")            # added to ticket 1: doesn't count
+    slack._clock += 121
+    greeting = post(desk, slack, "Hi team")            # greeting prompt: doesn't count
+    reply(desk, slack, greeting, "Printer is jammed")  # ticket 2
+    slack._clock += 121
+    post(desk, slack, "Outlook keeps crashing")        # third ticket within the hour: blocked
+
+    assert len(jira.created) == 2
+    assert last_post(slack)["text"].startswith(":hourglass:")
+
+
+def test_failed_jira_creates_dont_count_towards_the_limit(slack, jira, ai):
+    desk = desk_with(slack, jira, ai, MAX_TICKETS_PER_HOUR="1")
+    jira.fail_create = True
+    post(desk, slack, "VPN won't connect")
+    jira.fail_create = False
+    post(desk, slack, "VPN still won't connect")
+    assert len(jira.created) == 1
+
+
 # --- Buttons ---------------------------------------------------------------------------------------------------
 
 def test_only_the_requester_can_use_the_buttons(desk, slack, jira):

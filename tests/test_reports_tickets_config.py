@@ -103,6 +103,7 @@ def test_config_defaults_and_environment_notes():
     assert config.jira_request_issue_type == "Task"
     assert config.openai_api_key is None
     assert config.openai_model == "gpt-6-luna"
+    assert config.max_tickets_per_hour == 10
     assert make_config(OPENAI_MODEL="gpt-6.1-sol").openai_model == "gpt-6.1-sol"
     assert config.max_ai_follow_ups == 3
     assert config.merge_window_seconds == 120
@@ -133,6 +134,8 @@ def test_allowed_link_domains_are_normalised():
     ({"SLACK_APP_TOKEN": "xoxb-wrong"}, "xapp-"),
     ({"MAX_AI_FOLLOW_UPS": "lots"}, "whole number"),
     ({"JIRA_LABEL": "two words"}, "spaces"),
+    ({"MAX_TICKETS_PER_HOUR": "-1"}, "MAX_TICKETS_PER_HOUR must be 0"),
+    ({"MAX_TICKETS_PER_HOUR": "lots"}, "whole number"),
     ({"REPORT_HOUR": "25"}, "REPORT_HOUR must be between 0 and 23"),
     ({"REPORT_HOUR": "-1"}, "REPORT_HOUR must be between 0 and 23"),
     ({"REPORT_TIMEZONE": "Mars/Base"}, "REPORT_TIMEZONE 'Mars/Base' isn't a known time zone"),

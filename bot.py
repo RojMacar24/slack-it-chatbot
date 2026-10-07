@@ -9,7 +9,7 @@ as comments, and lets the requester close or escalate the ticket with buttons.
 import logging
 import re
 import threading
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from functools import lru_cache
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -81,6 +81,7 @@ class HelpDesk:
         self._state_lock = threading.Lock()
         self._opening = {}  # thread ts -> Event, for top-level posts still being turned into tickets
         self._recent_tickets = {}  # user ID -> (TicketRef, ts of their latest post on it), for merging split posts
+        self._tickets_opened = {}  # user ID -> deque of when they opened tickets in the last hour, for the limit
 
     def register(self, app):
         @app.event("message")
@@ -244,6 +245,22 @@ class HelpDesk:
             if recent and recent.key == ticket.key:
                 del self._recent_tickets[ticket.creator]
 
+    def _over_ticket_limit(self, user, ts):
+        """True if `user` already opened MAX_TICKETS_PER_HOUR tickets in the hour before `ts` (0 means no limit)."""
+        limit = self.config.max_tickets_per_hour
+        if limit <= 0:
+            return False
+        with self._state_lock:
+            opened = self._tickets_opened.get(user)
+            while opened and float(ts) - opened[0] >= 3600:
+                opened.popleft()
+            return bool(opened) and len(opened) >= limit
+
+    def _count_ticket(self, user, ts):
+        if self.config.max_tickets_per_hour > 0:
+            with self._state_lock:
+                self._tickets_opened.setdefault(user, deque()).append(float(ts))
+
     def _create_ticket(self, channel, thread_ts, requester, raw_text, files, source_ts):
         """Create the Jira ticket and post it in `thread_ts`. `source_ts` is the message with the details."""
         plain = slack_to_plain(raw_text, self.user_name)
@@ -251,6 +268,16 @@ class HelpDesk:
         if not text and not files:
             return None
         text = text or "(No text. See the attachments in Slack.)"
+        if self._over_ticket_limit(requester, source_ts):           # checked before the AI call, so it costs nothing
+            limit = self.config.max_tickets_per_hour
+            logger.warning("%s has opened %s tickets in the last hour; not opening another", requester, limit)
+            self.slack.chat_postMessage(
+                channel=channel,
+                thread_ts=thread_ts,
+                text=f":hourglass: You've opened {limit} tickets in the last hour, which is this help desk's limit. "
+                     "Please add details to one of your open tickets, or try again later.",
+            )
+            return None
 
         triage, ai_reply = self.assistant.assess(text)
         try:
@@ -273,6 +300,7 @@ class HelpDesk:
             return None
 
         logger.info("Opened %s (%s, %s) for %s", key, triage.kind, triage.category, requester)
+        self._count_ticket(requester, source_ts)
         ticket = tickets.TicketRef(key=key, creator=requester, thread_ts=thread_ts)
         reply = self._format_ai(ai_reply) if ai_reply else ""
         self.slack.chat_postMessage(
