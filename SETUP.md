@@ -119,6 +119,7 @@ In your IT channel:
 | `JIRA_REQUEST_ISSUE_TYPE` | | same as above | Issue type for access and change requests |
 | `JIRA_LABEL` | | `slack-it-bot` | Added to every ticket, and used by the report |
 | `JIRA_SET_PRIORITY` | | `true` | The bot retries without a priority if Jira rejects it |
+| `JIRA_SET_REPORTER` | | `true` | Make the requester the Jira reporter when possible. See below |
 | `JIRA_DONE_TRANSITION` | | | Exact transition name for "That fixed it", if the automatic choice is wrong |
 | `OPENAI_API_KEY` | | | Turns on AI triage and replies |
 | `OPENAI_MODEL` | | `gpt-6-luna` | Any chat model that supports JSON mode |
@@ -146,6 +147,24 @@ IT_STAFF=U0123ABCD, U0456EFGH
 ```
 
 Everyone's replies are still copied to Jira either way.
+
+### Making the requester the Jira reporter
+
+By default every ticket is reported by the bot's Jira account, and the description names who asked. The bot makes
+the requester the reporter instead when all of these are true:
+
+1. **The Slack app can read emails.** The manifest includes `users:read.email`. If you created the app before that
+   was added, add the scope under **OAuth & Permissions** and reinstall the app.
+2. **The bot's Jira account may set the reporter** (Jira's *Modify Reporter* permission). In a company-managed
+   project, grant it in the permission scheme. In a team-managed space, only the *Administrator* role has it, so only
+   do this if you're comfortable giving the bot that role. The bot checks this at startup and says in its log which
+   way it went.
+3. **The requester has a Jira account with the same email, and the bot can see that email.** Jira Cloud hides
+   people's emails from accounts that aren't admins, unless they set their email to be visible to *Anyone* in their
+   Atlassian profile. Jira Data Center usually shows them.
+
+If any of these isn't true, the bot quietly falls back to its own account. Set `JIRA_SET_REPORTER=false` to never
+look up emails at all.
 
 ## Deploying
 

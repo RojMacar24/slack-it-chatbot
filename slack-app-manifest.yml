@@ -16,6 +16,7 @@ oauth_config:
       - channels:read
       - chat:write
       - users:read
+      - users:read.email
 settings:
   event_subscriptions:
     bot_events:

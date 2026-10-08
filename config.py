@@ -36,6 +36,7 @@ class Config:
     jira_request_issue_type: str
     jira_label: str
     jira_set_priority: bool
+    jira_set_reporter: bool
     jira_done_transition: str | None
     openai_api_key: str | None
     openai_model: str
@@ -124,6 +125,7 @@ def load_config(env=None) -> Config:
         jira_request_issue_type=get("JIRA_REQUEST_ISSUE_TYPE", issue_type),
         jira_label=label,
         jira_set_priority=flag("JIRA_SET_PRIORITY", True),
+        jira_set_reporter=flag("JIRA_SET_REPORTER", True),
         jira_done_transition=get("JIRA_DONE_TRANSITION"),
         openai_api_key=get("OPENAI_API_KEY"),
         openai_model=get("OPENAI_MODEL", DEFAULT_MODEL),

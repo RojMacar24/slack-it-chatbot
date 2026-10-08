@@ -70,6 +70,71 @@ def test_create_issue_retries_without_priority_when_rejected():
     assert "priority" not in session.requests[1][2]["json"]["fields"]
 
 
+def test_create_issue_sets_the_reporter():
+    jira, session = client(("POST", "/rest/api/2/issue", FakeResponse(201, {"key": "IT-7"})))
+    jira.create_issue("IT", "Task", "s", "d", reporter={"accountId": "abc"})
+    assert session.requests[0][2]["json"]["fields"]["reporter"] == {"accountId": "abc"}
+
+
+def test_create_issue_drops_only_the_field_jira_rejected():
+    jira, session = client(
+        ("POST", "/rest/api/2/issue", FakeResponse(400, {"errors": {"reporter": "Field 'reporter' cannot be set."}})),
+        ("POST", "/rest/api/2/issue", FakeResponse(201, {"key": "IT-8"})),
+    )
+    assert jira.create_issue("IT", "Task", "s", "d", priority="High", reporter={"accountId": "abc"}) == "IT-8"
+    fields = session.requests[1][2]["json"]["fields"]
+    assert "reporter" not in fields and fields["priority"] == {"name": "High"}
+
+
+def test_create_issue_drops_both_optional_fields_when_jira_doesnt_say_which():
+    jira, session = client(
+        ("POST", "/rest/api/2/issue", FakeResponse(400, {"errorMessages": ["Something went wrong"]})),
+        ("POST", "/rest/api/2/issue", FakeResponse(201, {"key": "IT-9"})),
+    )
+    jira.create_issue("IT", "Task", "s", "d", priority="High", reporter={"accountId": "abc"})
+    assert not {"priority", "reporter"} & session.requests[1][2]["json"]["fields"].keys()
+
+
+def test_create_issue_without_optional_fields_doesnt_retry():
+    jira, _ = client(("POST", "/rest/api/2/issue", FakeResponse(400, {"errors": {"summary": "too long"}})))
+    with pytest.raises(JiraError) as caught:
+        jira.create_issue("IT", "Task", "s", "d")
+    assert caught.value.fields == ("summary",)
+
+
+def users(*entries):
+    return FakeResponse(200, [dict(entry, active=entry.get("active", True)) for entry in entries])
+
+
+@pytest.mark.parametrize("found, expected", [
+    ([{"accountId": "a1", "emailAddress": "Sam@Example.com"}], {"accountId": "a1"}),
+    ([{"accountId": "a1", "emailAddress": "sam@example.com.evil.io"}], None),          # a prefix match
+    ([{"accountId": "a1", "displayName": "sam@example.com"}], None),                   # email hidden
+    ([{"accountId": "a1", "emailAddress": "sam@example.com", "active": False}], None),
+    ([{"accountId": "a1", "emailAddress": "sam@example.com"},
+      {"accountId": "a2", "emailAddress": "sam@example.com"}], None),                  # ambiguous
+    ([], None),
+])
+def test_find_user_on_cloud_needs_one_exact_visible_email(found, expected):
+    jira, session = client(("GET", "/rest/api/2/user/search", users(*found)))
+    assert jira.find_user("sam@example.com") == expected
+    assert session.requests[0][2]["params"] == {"query": "sam@example.com", "maxResults": 20}
+
+
+def test_find_user_on_data_center_searches_by_username_and_returns_the_name():
+    jira, session = client(("GET", "/rest/api/2/user/search", users({"name": "sriv", "emailAddress": "sam@example.com"})),
+                           email=None)
+    assert jira.find_user("sam@example.com") == {"name": "sriv"}
+    assert session.requests[0][2]["params"]["username"] == "sam@example.com"
+
+
+def test_has_permission():
+    found = {"permissions": {"MODIFY_REPORTER": {"havePermission": False}}}
+    jira, session = client(("GET", "/rest/api/2/mypermissions", FakeResponse(200, found)))
+    assert jira.has_permission("IT", "MODIFY_REPORTER") is False
+    assert session.requests[0][2]["params"] == {"projectKey": "IT", "permissions": "MODIFY_REPORTER"}
+
+
 def test_errors_include_jiras_explanation():
     jira, _ = client(("POST", "/rest/api/2/issue",
                       FakeResponse(400, {"errorMessages": ["Bad"], "errors": {"issuetype": "invalid"}})))

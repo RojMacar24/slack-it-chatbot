@@ -31,6 +31,7 @@ class FakeSlack:
         self.calls = []
         self.threads = {}  # parent ts -> messages, parent first (like conversations.replies)
         self.names = {}
+        self.emails = {}  # user ID -> email, as users.info shows it with the users:read.email scope
         self.groups = {}  # user group ID -> member IDs
         self._clock = 1000
 
@@ -75,7 +76,9 @@ class FakeSlack:
         return {"messages": copy.deepcopy(self.threads.get(ts, []))}
 
     def users_info(self, user):
-        return {"user": {"id": user, "real_name": self.names.get(user, user)}}
+        self.calls.append(("users_info", {"user": user}))
+        profile = {"email": self.emails[user]} if user in self.emails else {}
+        return {"user": {"id": user, "real_name": self.names.get(user, user), "profile": profile}}
 
     def usergroups_users_list(self, usergroup):
         """Members of `usergroup` from `groups`. Raises like Slack does when the app lacks usergroups:read."""
@@ -94,16 +97,26 @@ class FakeJira:
         self.comments = []
         self.fail_create = False
         self.can_transition = True
+        self.accounts = {}  # email -> account ID, for find_user
+        self.user_lookups = []
+        self.permissions = {"MODIFY_REPORTER"}
 
     def browse_url(self, key):
         return f"{self.base_url}/browse/{key}"
 
-    def create_issue(self, project_key, issue_type, summary, description, labels=(), priority=None):
+    def has_permission(self, project_key, permission):
+        return permission in self.permissions
+
+    def find_user(self, email):
+        self.user_lookups.append(email)
+        return {"accountId": self.accounts[email]} if email in self.accounts else None
+
+    def create_issue(self, project_key, issue_type, summary, description, labels=(), priority=None, reporter=None):
         if self.fail_create:
             raise JiraError("POST /rest/api/2/issue returned 400: issuetype: invalid", 400)
         key = f"{project_key}-{len(self.created) + 1}"
-        self.created.append({"key": key, "issue_type": issue_type, "summary": summary,
-                             "description": description, "labels": list(labels), "priority": priority})
+        self.created.append({"key": key, "issue_type": issue_type, "summary": summary, "description": description,
+                             "labels": list(labels), "priority": priority, "reporter": reporter})
         self.issues[key] = {"status": {"statusCategory": {"key": "new"}}, "labels": list(labels)}
         return key
 
