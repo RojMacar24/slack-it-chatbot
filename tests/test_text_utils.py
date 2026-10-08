@@ -1,6 +1,6 @@
 import pytest
 
-from text_utils import redact_secrets, slack_to_plain, to_slack_mrkdwn, truncate
+from helpdesk.text_utils import redact_secrets, slack_to_plain, to_slack_mrkdwn, truncate
 
 
 def test_slack_to_plain_resolves_mentions_links_and_escapes():

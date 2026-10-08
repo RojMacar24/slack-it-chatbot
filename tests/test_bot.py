@@ -9,12 +9,12 @@ from slack_bolt.authorization import AuthorizeResult
 from slack_bolt.request import BoltRequest
 from slack_sdk.errors import SlackApiError
 
-import tickets
-from assistant import Assistant, CutOffAnswer
-from bot import ITStaff, HelpDesk, check_channel_access, is_report_command, resolve_channel_id, schedule_jobs
-from config import ConfigError
 from fakes import BOT_USER_ID, CHANNEL_ID, FakeAssistant, FakeJira, FakeSlack, make_config
-from jira_client import JiraError
+from helpdesk import tickets
+from helpdesk.assistant import Assistant, CutOffAnswer
+from helpdesk.bot import ITStaff, HelpDesk, check_channel_access, is_report_command, resolve_channel_id, schedule_jobs
+from helpdesk.config import ConfigError
+from helpdesk.jira_client import JiraError
 
 REQUESTER = "UREQ"
 ENGINEER = "UENG"

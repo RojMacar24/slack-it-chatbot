@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from assistant import Assistant, CutOffAnswer, Triage, is_small_talk, keyword_triage
+from helpdesk.assistant import Assistant, CutOffAnswer, Triage, is_small_talk, keyword_triage
 
 
 @pytest.mark.parametrize("text", [

@@ -19,12 +19,11 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk.errors import SlackApiError, SlackClientError
 
-import reports
-import tickets
-from assistant import Assistant, CutOffAnswer, is_small_talk
-from config import ConfigError, load_config
-from jira_client import JiraClient, JiraError, account_id, is_done, noformat, safe_inline
-from text_utils import redact_secrets, slack_to_plain, to_slack_mrkdwn
+from . import reports, tickets
+from .assistant import Assistant, CutOffAnswer, is_small_talk
+from .config import ConfigError, load_config
+from .jira_client import JiraClient, JiraError, account_id, is_done, noformat, safe_inline
+from .text_utils import redact_secrets, slack_to_plain, to_slack_mrkdwn
 
 logger = logging.getLogger("it_bot")
 
@@ -783,7 +782,3 @@ def main():
 
     logger.info("Watching %s for IT requests", config.it_channel)
     SocketModeHandler(app, config.slack_app_token).start()
-
-
-if __name__ == "__main__":
-    main()

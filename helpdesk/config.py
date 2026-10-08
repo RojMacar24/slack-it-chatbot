@@ -10,9 +10,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 
-from assistant import DEFAULT_MODEL
+from .assistant import DEFAULT_MODEL
 
-PROJECT_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = Path(__file__).resolve().parent.parent  # the repository root, where .env lives
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 # A member ID (U… or W…) or user group ID (S…), plain or as a Slack mention: <@U…> or <!subteam^S…|@name>
 _STAFF_ENTRY = re.compile(r"<@([UW][A-Z0-9]{2,})(?:\|[^>]*)?>|([UW][A-Z0-9]{2,})"
@@ -58,7 +58,7 @@ class Config:
 def load_config(env=None) -> Config:
     """Build a Config from `env`, which defaults to os.environ after loading .env."""
     if env is None:
-        load_dotenv()
+        load_dotenv(PROJECT_DIR / ".env")
         env = os.environ
 
     def get(name, default=None):
@@ -134,7 +134,7 @@ def load_config(env=None) -> Config:
         openai_api_key=get("OPENAI_API_KEY"),
         openai_model=get("OPENAI_MODEL", DEFAULT_MODEL),
         ai_allowed_link_domains=_domain_list(get("AI_ALLOWED_LINK_DOMAINS", "")),
-        it_environment=_read_environment_notes(get("IT_ENVIRONMENT_FILE", "it_environment.md")),
+        it_environment=_read_environment_notes(get("IT_ENVIRONMENT_FILE", "docs/it_environment.md")),
         escalation_mention=get("ESCALATION_MENTION"),
         it_staff_users=staff_users,
         it_staff_groups=staff_groups,

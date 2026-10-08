@@ -44,8 +44,8 @@ A self-contained lab project that automates first-line IT support between Slack 
 It runs over Slack **Socket Mode**, so it needs no public URL, web server or database. You can run it on a laptop.
 
 ```text
- Slack #it-help                      bot.py                          Jira
- ──────────────                      ──────                          ────
+ Slack #it-help                      helpdesk/                       Jira
+ ──────────────                      ─────────                       ────
  "VPN keeps dropping"  ──event──▶  triage (AI or keywords)  ──────▶  create IT-42
                                                                      (labels, priority)
  thread: 🎫 IT-42 + steps  ◀──────  post ticket + first reply  ────▶  comment: AI reply
@@ -57,24 +57,28 @@ It runs over Slack **Socket Mode**, so it needs no public URL, web server or dat
 
 ## Run it yourself
 
-The bot runs on a laptop with free Slack and Jira accounts; OpenAI is optional. **[SETUP.md](SETUP.md)** walks
+The bot runs on a laptop with free Slack and Jira accounts; OpenAI is optional. **[docs/SETUP.md](docs/SETUP.md)** walks
 through it step by step in about 45 minutes, and lists every setting, how to deploy it and how to troubleshoot it.
 
 ## Project layout
 
-| File | What it does |
-|---|---|
-| `bot.py` | Entry point. Slack event and button handlers, ticket lifecycle, weekly schedule |
-| `jira_client.py` | Small Jira REST client that works with both Jira Cloud and Data Center |
-| `assistant.py` | Triage and troubleshooting with OpenAI, falling back to keyword rules |
-| `tickets.py` | Slack message layout for tickets, and how the bot recognises its threads |
-| `reports.py` | Weekly summary built from Jira search results |
-| `text_utils.py` | Converts Slack and Markdown text, and redacts secrets |
-| `config.py` | Reads and validates settings from the environment or `.env` |
-| `it_environment.md` | Describes your lab's tools. Sent to the AI so its advice fits |
-| `slack-app-manifest.yml` | Creates the Slack app with the right scopes in one step |
-| `tests/` | Offline tests with fake Slack, Jira and OpenAI clients |
-| `SETUP.md` | Step-by-step setup, every setting, deploying and troubleshooting |
+```text
+helpdesk/                  the bot (run it with: python -m helpdesk)
+├── bot.py                 Slack event and button handlers, ticket lifecycle, Jira sync, schedule
+├── jira_client.py         small Jira REST client for Jira Cloud and Data Center
+├── assistant.py           triage and troubleshooting with OpenAI, falling back to keyword rules
+├── tickets.py             how ticket messages look in Slack, and how the bot recognises its threads
+├── reports.py             the weekly summary, built from Jira search results
+├── text_utils.py          converts Slack and Markdown text, and masks secrets
+└── config.py              reads and checks the settings from the environment or .env
+tests/                     offline tests with fake Slack, Jira and OpenAI clients
+docs/
+├── SETUP.md               step-by-step setup, every setting, deploying and troubleshooting
+├── slack-app-manifest.yml creates the Slack app with the right permissions in one step
+├── it_environment.md      describes your lab's tools, sent to the AI so its advice fits
+└── demo.gif
+requirements*.in / .txt    dependency ranges, and the hashed lock files generated from them
+```
 
 ## How it works
 

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from openai import OpenAI
 
-from text_utils import truncate
+from .text_utils import truncate
 
 logger = logging.getLogger(__name__)
 

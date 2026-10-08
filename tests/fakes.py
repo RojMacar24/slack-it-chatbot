@@ -4,9 +4,9 @@ import copy
 
 from slack_sdk.errors import SlackApiError
 
-from assistant import keyword_triage
-from config import load_config
-from jira_client import JiraError
+from helpdesk.assistant import keyword_triage
+from helpdesk.config import load_config
+from helpdesk.jira_client import JiraError
 
 BOT_USER_ID = "UBOT"
 CHANNEL_ID = "CITHELP01"

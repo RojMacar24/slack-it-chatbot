@@ -3,9 +3,9 @@
 from collections import Counter
 from urllib.parse import quote
 
-from assistant import CATEGORY_NAMES, KIND_NAMES
-from jira_client import is_done
-from tickets import CATEGORY_LABEL_PREFIX, ESCALATED_LABEL
+from .assistant import CATEGORY_NAMES, KIND_NAMES
+from .jira_client import is_done
+from .tickets import CATEGORY_LABEL_PREFIX, ESCALATED_LABEL
 
 
 def build_report(jira, project_key, label, days=7):
