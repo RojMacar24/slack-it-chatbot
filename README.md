@@ -13,7 +13,8 @@ each ticket up to date with the Slack conversation until the problem is solved.*
 ## Highlights
 
 - **End-to-end automation.** A Slack post becomes a typed, prioritised, labelled Jira ticket within seconds. Thread
-  replies become Jira comments, and buttons in Slack resolve or escalate the ticket in Jira.
+  replies become Jira comments, buttons in Slack resolve or escalate the ticket in Jira, and status changes made in
+  Jira come back to the Slack thread.
 - **AI with guardrails.** OpenAI returns structured triage that the bot validates, with a keyword-rule fallback, so
   tickets still flow when there's no API key or the API fails. The AI steps back as soon as someone from IT joins.
 - **Built for real conversations.** Greetings get asked for details, split messages merge into one ticket, replies
@@ -21,7 +22,8 @@ each ticket up to date with the Slack conversation until the problem is solved.*
 - **Secure by default.** Passwords and tokens are masked before anything reaches Jira or OpenAI, AI output is escaped
   so it can't ping a whole channel, and the Slack app asks only for the permissions it uses.
 - **Simple to run, thoroughly tested.** No database (Jira is the source of truth) and no public URL (Slack Socket
-  Mode). Over 100 automated tests with fake Slack, Jira and OpenAI clients run on every pull request.
+  Mode). Over 200 automated tests with fake Slack, Jira and OpenAI clients run on Linux and Windows on every pull
+  request.
 
 **Tech:** Python 3.12 · Slack Bolt (Socket Mode, Block Kit) · Jira REST API (Cloud and Data Center) · OpenAI API ·
 APScheduler · pytest · GitHub Actions
@@ -35,6 +37,7 @@ A self-contained lab project that automates first-line IT support between Slack 
 - The bot replies in the Slack thread with the ticket link and, if OpenAI is configured, **first troubleshooting steps**.
 - Replies in the thread are **copied into Jira as comments**, so the ticket holds the whole conversation.
 - The requester can press **✅ That fixed it**, which closes the Jira ticket, or **🆘 Escalate to IT**, which labels it and pings your IT group.
+- When IT **changes a ticket's status in Jira**, the bot posts it in the Slack thread, and closing it there takes the buttons away.
 - The AI stops replying as soon as someone from IT joins the thread (a coworker's "+1" doesn't count), the ticket is escalated or closed, or it has run out of attempts.
 - A **weekly report**, built from Jira data, is posted to the channel. You can also get one any time with `@IT Help Desk report`.
 
@@ -49,6 +52,7 @@ It runs over Slack **Socket Mode**, so it needs no public URL, web server or dat
  "still failing"       ──event──▶  AI follow-up             ──────▶  comment: both messages
  [✅ That fixed it]     ──button─▶  transition to Done       ──────▶  IT-42 → Done
  [🆘 Escalate to IT]    ──button─▶  label "escalated"        ──────▶  IT-42 + label, comment
+ thread: "moved to Done"  ◀──────  check for changes (1 min) ◀─────  IT moves IT-42 → Done
 ```
 
 ## Run it yourself
@@ -100,11 +104,23 @@ names who asked.
 same thread are handled one at a time. If someone sends two messages in quick succession, the AI answers once,
 covering both.
 
+**Jira to Slack.** Socket Mode has no public URL for a Jira webhook, so every `JIRA_SYNC_SECONDS` (1 minute by default)
+the bot asks Jira which of its tickets changed recently, with their change history. It posts each status change a
+person made, such as "Alex Kim moved IT-42 from To Do to In Progress in Jira", in the ticket's Slack thread. The
+bot finds that thread from the link in the ticket description, and checks that the thread really is that ticket's
+before posting. Its own changes are skipped, since it already announced them. When a ticket reaches a Done status,
+its buttons come off, just as if the requester had pressed **That fixed it**.
+
 **No database.** The bot recognises its tickets from its own thread message, which starts with
 "Ticket IT-42 created". The requester is whoever started the thread. Jira is the source of truth for status and
 labels, so closing or labelling a ticket directly in Jira also stops the AI. The only things kept in memory are
-short-lived: tickets still being created, and each person's latest ticket for the merge window. A restart forgets
-those and nothing else.
+short-lived:
+
+- tickets still being created
+- each person's latest ticket, for the merge window
+- which Jira changes have been posted already
+
+A restart forgets those and nothing else. Changes made in Jira while the bot is stopped aren't posted afterwards.
 
 **When the AI stays quiet.** It only replies to the person who opened the ticket, and only on incidents. It stops when:
 
@@ -138,8 +154,8 @@ Slack event and button payloads through Bolt's router to check the wiring. GitHu
 
 ## Ideas for extending the lab
 
-- **Jira to Slack updates:** post in the thread when an agent changes status or comments. This needs a Jira webhook,
-  or an automation rule that calls a small HTTP endpoint, or polling with JQL.
+- **Jira comments in Slack:** status changes already reach the thread. Comments from IT could too, and a reply in
+  Slack could go back as a comment visible to the requester.
 - **Knowledge base:** search Confluence or a docs folder and include the matching articles in the AI prompt.
 - **Jira Service Management:** map incident and request types to JSM request types and SLAs.
 - **Another AI provider:** everything model-specific is in `assistant.py`.

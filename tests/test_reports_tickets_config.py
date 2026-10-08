@@ -104,6 +104,7 @@ def test_config_defaults_and_environment_notes():
     assert config.openai_api_key is None
     assert config.openai_model == "gpt-6-luna"
     assert config.max_tickets_per_hour == 10
+    assert config.jira_sync_seconds == 60 and make_config(JIRA_SYNC_SECONDS="0").jira_sync_seconds == 0
     assert make_config(OPENAI_MODEL="gpt-6.1-sol").openai_model == "gpt-6.1-sol"
     assert config.max_ai_follow_ups == 3
     assert config.merge_window_seconds == 120
@@ -154,6 +155,8 @@ def test_allowed_link_domains_are_normalised():
     ({"IT_STAFF": "u012ab"}, "IT_STAFF entry 'u012ab'"),
     ({"MAX_TICKETS_PER_HOUR": "-1"}, "MAX_TICKETS_PER_HOUR must be 0"),
     ({"MAX_TICKETS_PER_HOUR": "lots"}, "whole number"),
+    ({"JIRA_SYNC_SECONDS": "5"}, "JIRA_SYNC_SECONDS must be 0 \\(off\\) or at least 10"),
+    ({"JIRA_SYNC_SECONDS": "-60"}, "JIRA_SYNC_SECONDS must be 0"),
     ({"REPORT_HOUR": "25"}, "REPORT_HOUR must be between 0 and 23"),
     ({"REPORT_HOUR": "-1"}, "REPORT_HOUR must be between 0 and 23"),
     ({"REPORT_TIMEZONE": "Mars/Base"}, "REPORT_TIMEZONE 'Mars/Base' isn't a known time zone"),

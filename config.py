@@ -48,6 +48,7 @@ class Config:
     max_ai_follow_ups: int
     merge_window_seconds: int
     max_tickets_per_hour: int
+    jira_sync_seconds: int
     report_enabled: bool
     report_day: str
     report_hour: int
@@ -103,6 +104,9 @@ def load_config(env=None) -> Config:
     max_tickets_per_hour = number("MAX_TICKETS_PER_HOUR", 10)
     if max_tickets_per_hour < 0:
         raise ConfigError("MAX_TICKETS_PER_HOUR must be 0 (no limit) or more.")
+    jira_sync_seconds = number("JIRA_SYNC_SECONDS", 60)
+    if jira_sync_seconds != 0 and jira_sync_seconds < 10:
+        raise ConfigError("JIRA_SYNC_SECONDS must be 0 (off) or at least 10, so the bot doesn't flood Jira with requests.")
 
     report_enabled = flag("REPORT_ENABLED", True)
     report_day = get("REPORT_DAY", "mon")
@@ -137,6 +141,7 @@ def load_config(env=None) -> Config:
         max_ai_follow_ups=number("MAX_AI_FOLLOW_UPS", 3),
         merge_window_seconds=number("MERGE_WINDOW_SECONDS", 120),
         max_tickets_per_hour=max_tickets_per_hour,
+        jira_sync_seconds=jira_sync_seconds,
         report_enabled=report_enabled,
         report_day=report_day,
         report_hour=report_hour,

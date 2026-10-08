@@ -11,7 +11,7 @@ from slack_sdk.errors import SlackApiError
 
 import tickets
 from assistant import Assistant, CutOffAnswer
-from bot import ITStaff, HelpDesk, check_channel_access, is_report_command, resolve_channel_id, schedule_weekly_report
+from bot import ITStaff, HelpDesk, check_channel_access, is_report_command, resolve_channel_id, schedule_jobs
 from config import ConfigError
 from fakes import BOT_USER_ID, CHANNEL_ID, FakeAssistant, FakeJira, FakeSlack, make_config
 from jira_client import JiraError
@@ -691,6 +691,140 @@ def test_escalate_labels_the_ticket_and_mentions_the_it_team(desk, slack, jira):
     assert "already been escalated" in slack.calls_to("chat_postEphemeral")[-1]["text"]
 
 
+# --- Jira to Slack ---------------------------------------------------------------------------------------------
+
+def jira_notes(slack, thread_ts):
+    return [m["text"] for m in slack.threads[thread_ts] if tickets.is_jira_note(m)]
+
+
+def test_status_changes_made_in_jira_are_posted_in_the_thread_once(desk, slack, jira):
+    ts = post(desk, slack, "VPN won't connect")
+    jira.change_status("IT-1", "In Progress")
+    desk.sync_from_jira()
+    desk.sync_from_jira()  # nothing new the second time
+
+    assert jira_notes(slack, ts) == [
+        ":arrows_counterclockwise: Alex Kim moved <https://jira.example/browse/IT-1|IT-1> from *To Do* to "
+        "*In Progress* in Jira."]
+    assert tickets.has_buttons(slack.threads[ts][1]["blocks"])  # still open, so the buttons stay
+    assert 'labels = "slack-it-bot"' in jira.last_jql and "updated >= -5m" in jira.last_jql
+
+
+def test_closing_in_jira_removes_the_buttons_and_ends_the_merge_window(desk, slack, jira):
+    ts = post(desk, slack, "VPN won't connect")
+    reply(desk, slack, ts, "Still failing")
+    jira.change_status("IT-1", "In Progress")
+    jira.change_status("IT-1", "Done", "done", by="acct-jo", who="Jo Park")
+    desk.sync_from_jira()
+
+    [note] = jira_notes(slack, ts)
+    assert note.splitlines() == [
+        ":arrows_counterclockwise: Alex Kim moved <https://jira.example/browse/IT-1|IT-1> from *To Do* to *In Progress* in Jira.",
+        ":arrows_counterclockwise: Jo Park moved <https://jira.example/browse/IT-1|IT-1> from *In Progress* to *Done* in Jira.",
+        "This ticket is closed now. If you still need help, post a new message in the channel.",
+    ]
+    assert not any(tickets.has_buttons(m.get("blocks")) for m in slack.threads[ts])
+    post(desk, slack, "Now the printer is jammed")  # within the merge window, but the old ticket is closed
+    assert len(jira.created) == 2
+
+
+def test_the_bots_own_changes_arent_repeated(desk, slack, jira):
+    ts = post(desk, slack, "VPN won't connect")
+    click(desk, slack, ts, tickets.RESOLVE_ACTION)
+    desk.sync_from_jira()
+    assert jira_notes(slack, ts) == []
+    assert ":white_check_mark:" in last_post(slack)["text"]  # the bot's own announcement is enough
+
+
+def test_after_a_restart_older_changes_arent_posted_again(slack, jira, ai):
+    ts = post(desk_with(slack, jira, ai), slack, "VPN won't connect")
+    jira.change_status("IT-1", "In Progress")
+    restarted = desk_with(slack, jira, ai)
+    restarted.sync_from_jira()
+    assert jira_notes(slack, ts) == []  # it can't know whether the previous run relayed this
+
+    jira.change_status("IT-1", "Waiting for user")
+    restarted.sync_from_jira()
+    assert len(jira_notes(slack, ts)) == 1 and "to *Waiting for user*" in jira_notes(slack, ts)[0]
+
+
+def test_greeting_threads_are_found_from_the_reply_link(desk, slack, jira):
+    ts = post(desk, slack, "Hi team")
+    reply(desk, slack, ts, "My VPN keeps disconnecting")
+    assert "?thread_ts=" + ts in jira.created[0]["description"]
+    jira.change_status("IT-1", "In Progress")
+    desk.sync_from_jira()
+    assert len(jira_notes(slack, ts)) == 1
+
+
+@pytest.mark.parametrize("description", [
+    "Edited by IT: no link here",
+    "Reported in Slack by Sam.\nSlack thread: https://slack.example/archives/COTHER/p1001000100\n\n{noformat}\nx\n{noformat}",
+    "Reported in Slack by Sam.\n\n{noformat}\nSlack thread: https://slack.example/archives/CITHELP01/p1001000100\n{noformat}",
+])
+def test_jira_changes_are_only_posted_to_the_tickets_own_thread(desk, slack, jira, description, caplog):
+    ts = post(desk, slack, "VPN won't connect")
+    jira.issues["IT-1"]["description"] = description
+    jira.change_status("IT-1", "In Progress")
+    desk.sync_from_jira()
+    assert jira_notes(slack, ts) == []
+    assert "doesn't link to a thread in the IT channel" in caplog.text
+
+
+def test_a_link_to_another_tickets_thread_is_ignored(desk, slack, jira, caplog):
+    first = post(desk, slack, "VPN won't connect")
+    slack._clock += 121
+    post(desk, slack, "Printer is jammed")
+    jira.issues["IT-2"]["description"] = jira.issues["IT-1"]["description"]  # points at IT-1's thread
+    jira.change_status("IT-2", "In Progress")
+    desk.sync_from_jira()
+    assert jira_notes(slack, first) == []
+    assert "isn't its ticket thread" in caplog.text
+
+
+def test_jira_notes_dont_use_up_ai_replies_or_reach_the_ai(slack, jira, ai):
+    desk = desk_with(slack, jira, ai, MAX_AI_FOLLOW_UPS="1")
+    ts = post(desk, slack, "VPN won't connect")
+    jira.change_status("IT-1", "In Progress", who="<!channel> *Alex*")
+    desk.sync_from_jira()
+    assert jira_notes(slack, ts)[0].startswith(":arrows_counterclockwise: &lt;!channel&gt; *Alex* moved")
+
+    reply(desk, slack, ts, "Still failing")
+    assert len(ai.histories) == 1
+    assert not any("moved" in m["content"] for m in ai.histories[0])
+
+
+def test_jira_sync_survives_jira_and_slack_errors(desk, slack, jira, caplog):
+    ts = post(desk, slack, "VPN won't connect")
+    jira.change_status("IT-1", "In Progress")
+
+    def broken(*args, **kwargs):
+        raise JiraError("GET /rest/api/3/search/jql returned 503: unavailable", 503)
+
+    working_search, jira.search = jira.search, broken
+    desk.sync_from_jira()
+    assert "Couldn't check Jira for changes" in caplog.text
+
+    jira.search = working_search
+    slack.fail_post = lambda post: tickets.is_jira_note(post)
+    desk.sync_from_jira()
+    assert "Couldn't relay the Jira changes to IT-1 to Slack" in caplog.text
+    assert jira_notes(slack, ts) == []
+
+
+@pytest.mark.parametrize("description, expected", [
+    ("Reported in Slack by Sam.\nSlack thread: https://x.slack.com/archives/C0AB12/p1700000000000100", ("C0AB12", "1700000000.000100")),
+    ("Slack thread: https://x.slack.com/archives/G0AB12/p1700000001000200?thread_ts=1700000000.000100&cid=G0AB12",
+     ("G0AB12", "1700000000.000100")),
+    ("Slack thread: https://x.slack.com/archives/C0AB12/p1700000001000200?thread_ts=bogus", ("C0AB12", "1700000001.000200")),
+    ("Slack thread: http://x.slack.com/archives/C0AB12/p1700000000000100", None),
+    ("", None),
+    (None, None),
+])
+def test_slack_thread_in(description, expected):
+    assert tickets.slack_thread_in(description) == expected
+
+
 # --- Reports, setup and Bolt wiring ----------------------------------------------------------------------------
 
 def test_report_mention_posts_summary_in_thread(desk, slack, jira):
@@ -743,12 +877,20 @@ def test_startup_explains_what_to_fix_when_the_channel_cant_be_read():
         resolve_channel_id(SlackWithoutScopes(), "#it-help")
 
 
-def test_weekly_report_schedule_uses_configured_time(desk):
-    scheduler = schedule_weekly_report(desk, make_config(REPORT_DAY="fri", REPORT_HOUR="16", REPORT_TIMEZONE="America/New_York"))
-    [job] = scheduler.get_jobs()
-    fields = {f.name: str(f) for f in job.trigger.fields}
+def test_schedule_has_the_weekly_report_and_the_jira_sync(desk):
+    scheduler = schedule_jobs(desk, make_config(REPORT_DAY="fri", REPORT_HOUR="16", REPORT_TIMEZONE="America/New_York",
+                                                JIRA_SYNC_SECONDS="45"))
+    jobs = {job.id: job for job in scheduler.get_jobs()}
+    fields = {f.name: str(f) for f in jobs["weekly_report"].trigger.fields}
     assert fields["day_of_week"] == "fri" and fields["hour"] == "16"
-    assert str(job.trigger.timezone) == "America/New_York"
+    assert str(jobs["weekly_report"].trigger.timezone) == "America/New_York"
+    assert jobs["jira_sync"].trigger.interval.total_seconds() == 45 and jobs["jira_sync"].max_instances == 1
+
+
+def test_schedule_leaves_out_what_is_turned_off(desk):
+    # With the report off, its time zone isn't checked, so a bad one mustn't break the scheduler
+    config = make_config(REPORT_ENABLED="false", REPORT_TIMEZONE="Mars/Base", JIRA_SYNC_SECONDS="0")
+    assert schedule_jobs(desk, config).get_jobs() == []
 
 
 def test_bolt_routes_events_and_button_clicks_to_the_desk(desk, slack, jira):

@@ -8,6 +8,7 @@ with "Ticket <KEY> created". The requester is whoever started the thread, and Ji
 import json
 import re
 from dataclasses import dataclass
+from urllib.parse import parse_qs, urlsplit
 
 from assistant import CATEGORY_NAMES, KIND_NAMES
 from text_utils import escape_mrkdwn, truncate
@@ -21,6 +22,10 @@ _TICKET_TEXT = re.compile(r"Ticket ([A-Z][A-Z0-9_]*-\d+) created")
 # The key may be plain ("IT-6") or a Slack link ("<https://…/browse/IT-6|IT-6>"), the format used since #28.
 _LINKED_TEXT = re.compile(r"Added to ticket (?:<[^|>]+\|)?([A-Z][A-Z0-9_]*-\d+)")
 _DETAILS_PROMPT = re.compile(r"Hi <@\w+>! What's going on\?")
+# The "Slack thread:" line the bot writes in its ticket descriptions. A link to a reply also carries ?thread_ts=…
+_THREAD_LINK = re.compile(r"^Slack thread: (https://\S+/archives/([CG][A-Z0-9]+)/p(\d+)(\d{6})\S*)$", re.MULTILINE)
+_SLACK_TS = re.compile(r"\d+\.\d{6}")
+JIRA_NOTE_ICON = ":arrows_counterclockwise:"  # starts the bot's notes about changes made in Jira
 _SECTION_LIMIT = 2900  # Slack allows 3,000 characters in a section block
 
 SECRET_WARNING = (":lock: Your message looks like it contains a password or key. I kept it out of the ticket, "
@@ -147,14 +152,15 @@ def human_took_over(messages, creator, bot_user_id, staff=None):
 
 
 def ai_reply_count(messages, bot_user_id):
-    """How many messages the bot has posted in the thread after its ticket message."""
+    """How many messages the bot has posted in the thread after its ticket message, not counting notes about
+    changes made in Jira."""
     count, after_ticket = 0, False
     for message in messages[1:]:
         if message.get("user") != bot_user_id:
             continue
         if _TICKET_TEXT.match(message.get("text", "")):
             after_ticket = True
-        elif after_ticket:
+        elif after_ticket and not is_jira_note(message):
             count += 1
     return count
 
@@ -164,6 +170,8 @@ def conversation_history(messages, creator, bot_user_id, clean):
     history = []
     for message in messages:
         if message.get("user") == bot_user_id:
+            if is_jira_note(message):
+                continue  # the bot relaying a Jira change, not something the AI said
             role = "assistant"
         elif message.get("user") == creator and not message.get("bot_id"):
             role = "user"
@@ -173,6 +181,34 @@ def conversation_history(messages, creator, bot_user_id, clean):
         if content:
             history.append({"role": role, "content": content})
     return history
+
+
+def slack_thread_in(description):
+    """(channel, thread ts) from the "Slack thread:" link in a ticket description the bot wrote, or None.
+
+    Only the lines before the requester's own text (which is in a {noformat} block) are read, so a link someone
+    pasted into their message can't point the bot at another thread.
+    """
+    match = _THREAD_LINK.search((description or "").split("{noformat}", 1)[0])
+    if not match:
+        return None
+    url, channel, seconds, micros = match.groups()
+    thread_ts = (parse_qs(urlsplit(url).query).get("thread_ts") or [""])[0]
+    return channel, thread_ts if _SLACK_TS.fullmatch(thread_ts) else f"{seconds}.{micros}"
+
+
+def jira_changes_text(key, url, changes, closed):
+    """The bot's note in a ticket thread about status changes someone made in Jira. `changes` is a list of
+    (who, from status, to status) as Jira gave them, so they're escaped here."""
+    lines = [f"{JIRA_NOTE_ICON} {escape_mrkdwn(who)} moved <{url}|{key}> from *{escape_mrkdwn(old or 'no status')}* "
+             f"to *{escape_mrkdwn(new or 'no status')}* in Jira." for who, old, new in changes]
+    if closed:
+        lines.append("This ticket is closed now. If you still need help, post a new message in the channel.")
+    return "\n".join(lines)
+
+
+def is_jira_note(message):
+    return message.get("text", "").startswith(JIRA_NOTE_ICON)
 
 
 def _with_article(noun):
