@@ -9,6 +9,7 @@ as comments, and lets the requester close or escalate the ticket with buttons.
 import logging
 import re
 import threading
+import time
 from collections import OrderedDict, deque
 from functools import lru_cache
 
@@ -67,6 +68,56 @@ class KeyedLocks:
         return self._locks[hash(key) % len(self._locks)]
 
 
+class ITStaff:
+    """The people whose replies mean IT has taken over a ticket (IT_STAFF): Slack member IDs, plus the members of any
+    user groups. Groups are re-read every few minutes, so changes to them apply without a restart."""
+
+    REFRESH_SECONDS = 300
+
+    def __init__(self, slack, users=(), groups=(), clock=time.monotonic):
+        self._slack = slack
+        self._users = frozenset(users)
+        self._groups = tuple(groups)
+        self._clock = clock
+        self._members = frozenset()  # of the user groups, as last read
+        self._read_at = None
+        self._lock = threading.Lock()
+
+    def load(self):
+        """Read the user groups now, so a setup problem stops the bot at startup with a fix."""
+        if not self._groups:
+            return
+        with self._lock:
+            try:
+                self._read_groups()
+            except SlackApiError as exc:
+                raise ConfigError(
+                    f"Couldn't read the IT_STAFF user groups ({_slack_error(exc)}). Add the usergroups:read scope to "
+                    "the Slack app and reinstall it, or list member IDs instead (user groups need a paid Slack plan)."
+                ) from None
+
+    def __contains__(self, user_id):
+        return user_id in self._users or user_id in self._group_members()
+
+    def _group_members(self):
+        if not self._groups:
+            return frozenset()
+        with self._lock:
+            if self._read_at is None or self._clock() - self._read_at >= self.REFRESH_SECONDS:
+                try:
+                    self._read_groups()
+                except SlackApiError as exc:
+                    self._read_at = self._clock()  # try again later, not on every message
+                    logger.warning("Couldn't re-read the IT_STAFF user groups, so using the last list: %s", exc)
+            return self._members
+
+    def _read_groups(self):
+        members = set()
+        for group in self._groups:
+            members.update(self._slack.usergroups_users_list(usergroup=group)["users"])
+        self._members, self._read_at = frozenset(members), self._clock()
+
+
 class HelpDesk:
     def __init__(self, config, slack, jira, assistant, bot_user_id, channel_id):
         self.config = config
@@ -77,6 +128,9 @@ class HelpDesk:
         self.channel_id = channel_id
         self._seen = RecentKeys()
         self.user_name = lru_cache(maxsize=1024)(self._lookup_user_name)
+        # Without IT_STAFF, a reply from anyone but the requester counts as IT taking over
+        has_staff = config.it_staff_users or config.it_staff_groups
+        self.it_staff = ITStaff(slack, config.it_staff_users, config.it_staff_groups) if has_staff else None
         # Locking order is always user lock, then thread lock.
         self._user_locks = KeyedLocks()
         self._thread_locks = KeyedLocks()
@@ -380,7 +434,7 @@ class HelpDesk:
         """
         if not self.assistant.enabled or not new_text:
             return
-        if tickets.human_took_over(messages, ticket.creator, self.bot_user_id):
+        if tickets.human_took_over(messages, ticket.creator, self.bot_user_id, self.it_staff):
             return  # someone from IT has joined, so the AI stays out of the way
         if tickets.has_later_message_from(messages, ticket.creator, new_ts):
             return  # they've already said more, and answering that message covers this one too
@@ -599,6 +653,13 @@ def main():
                        config.it_channel)
 
     desk = HelpDesk(config, app.client, jira, assistant, bot_user_id, channel_id)
+    if desk.it_staff:
+        try:
+            desk.it_staff.load()
+        except ConfigError as exc:
+            raise SystemExit(f"Configuration problem: {exc}") from None
+        logger.info("IT staff: %d people and %d user groups (IT_STAFF)", len(config.it_staff_users),
+                    len(config.it_staff_groups))
     desk.register(app)
     if config.report_enabled:
         schedule_weekly_report(desk, config).start()

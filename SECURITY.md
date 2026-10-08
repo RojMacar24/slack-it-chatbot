@@ -47,6 +47,8 @@ The manifest requests only what the bot uses:
 | `app_mentions:read` | Respond to `@IT Help Desk report` |
 | `users:read` | Show names instead of user IDs in Jira |
 
+`usergroups:read` isn't in the manifest. Add it only if `IT_STAFF` lists a user group.
+
 The bot only acts on messages in the configured channel. Only the person who opened a ticket can use its buttons.
 
 ## AI safety
@@ -84,7 +86,8 @@ What the bot doesn't protect against, or only partly:
 - **Limits live in memory.** The ticket limit (`MAX_TICKETS_PER_HOUR`) and the merge window reset when the bot
   restarts, and only work if one copy of the bot runs. They slow down spam; they don't stop a determined attacker.
   Prepaid OpenAI credit with auto-recharge off is the hard cap on AI spending.
-- **The bot can't tell IT staff from coworkers.** A reply from anyone other than the requester stops the AI (#7).
+- **IT staff are who `IT_STAFF` says they are.** Without it, any reply from someone other than the requester stops
+  the AI. That's a nuisance, not a security risk, since the AI only ever helps the requester.
 - **Changes made in Jira don't reach Slack** (#6). Closing a ticket in Jira doesn't update its Slack thread.
 - **Every ticket is reported by the bot's Jira account** (#9). The requester's name is in the description.
 - **Jira and OpenAI keep what they're sent** under their own retention policies. Data already sent can't be

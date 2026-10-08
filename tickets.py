@@ -136,10 +136,12 @@ def has_later_message_from(messages, user_id, ts):
     return any(message.get("user") == user_id and float(message.get("ts", 0)) > float(ts) for message in messages)
 
 
-def human_took_over(messages, creator, bot_user_id):
-    """True once anyone other than the requester and this bot has replied, e.g. someone from IT."""
+def human_took_over(messages, creator, bot_user_id, staff=None):
+    """True once someone other than the requester and this bot has replied, e.g. someone from IT. With `staff`
+    (IT_STAFF), only replies from those people count, so a coworker's "+1" doesn't silence the AI."""
     return any(
         message.get("user") and message["user"] not in (creator, bot_user_id) and not message.get("bot_id")
+        and (staff is None or message["user"] in staff)
         for message in messages[1:]
     )
 

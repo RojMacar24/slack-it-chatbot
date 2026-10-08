@@ -1,6 +1,7 @@
 """Settings for the bot, read from environment variables. A local .env file is loaded automatically."""
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -13,6 +14,9 @@ from assistant import DEFAULT_MODEL
 
 PROJECT_DIR = Path(__file__).resolve().parent
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+# A member ID (U… or W…) or user group ID (S…), plain or as a Slack mention: <@U…> or <!subteam^S…|@name>
+_STAFF_ENTRY = re.compile(r"<@([UW][A-Z0-9]{2,})(?:\|[^>]*)?>|([UW][A-Z0-9]{2,})"
+                          r"|<!subteam\^(S[A-Z0-9]{2,})(?:\|[^>]*)?>|(S[A-Z0-9]{2,})")
 
 
 class ConfigError(Exception):
@@ -38,6 +42,8 @@ class Config:
     ai_allowed_link_domains: tuple[str, ...]
     it_environment: str
     escalation_mention: str | None
+    it_staff_users: tuple[str, ...]
+    it_staff_groups: tuple[str, ...]
     max_ai_follow_ups: int
     merge_window_seconds: int
     max_tickets_per_hour: int
@@ -104,6 +110,7 @@ def load_config(env=None) -> Config:
     if report_enabled:
         _check_report_schedule(report_day, report_hour, report_timezone)
 
+    staff_users, staff_groups = _staff_list(get("IT_STAFF", ""))
     issue_type = get("JIRA_ISSUE_TYPE", "Task")
     return Config(
         slack_bot_token=bot_token,
@@ -123,6 +130,8 @@ def load_config(env=None) -> Config:
         ai_allowed_link_domains=_domain_list(get("AI_ALLOWED_LINK_DOMAINS", "")),
         it_environment=_read_environment_notes(get("IT_ENVIRONMENT_FILE", "it_environment.md")),
         escalation_mention=get("ESCALATION_MENTION"),
+        it_staff_users=staff_users,
+        it_staff_groups=staff_groups,
         max_ai_follow_ups=number("MAX_AI_FOLLOW_UPS", 3),
         merge_window_seconds=number("MERGE_WINDOW_SECONDS", 120),
         max_tickets_per_hour=max_tickets_per_hour,
@@ -153,6 +162,20 @@ def _domain_list(value):
     """"example.com, *.docs.example.org" -> ("example.com", "docs.example.org")."""
     domains = (part.strip().lower().removeprefix("*.").strip(".") for part in value.split(","))
     return tuple(domain for domain in domains if domain)
+
+
+def _staff_list(value):
+    """"U012AB, <!subteam^S034CD|@it-team>" -> (("U012AB",), ("S034CD",)): Slack user IDs and user group IDs, written
+    plainly or in the mention syntax ESCALATION_MENTION uses."""
+    users, groups = [], []
+    for part in filter(None, (part.strip() for part in value.split(","))):
+        match = _STAFF_ENTRY.fullmatch(part)
+        if not match:
+            raise ConfigError(f"IT_STAFF entry {part!r} isn't a Slack member ID (U…) or user group ID (S…). "
+                              "Separate entries with commas.")
+        user, group = match.group(1) or match.group(2), match.group(3) or match.group(4)
+        (users if user else groups).append(user or group)
+    return tuple(users), tuple(groups)
 
 
 def _read_environment_notes(filename):
