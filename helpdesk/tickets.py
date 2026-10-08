@@ -10,8 +10,8 @@ import re
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlsplit
 
-from assistant import CATEGORY_NAMES, KIND_NAMES
-from text_utils import escape_mrkdwn, truncate
+from .assistant import CATEGORY_NAMES, KIND_NAMES
+from .text_utils import escape_mrkdwn, truncate
 
 RESOLVE_ACTION = "resolve_ticket"
 ESCALATE_ACTION = "escalate_ticket"

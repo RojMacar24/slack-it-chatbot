@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 import requests
 
-from jira_client import (
+from helpdesk.jira_client import (
     JiraClient, JiraError, account_id, is_done, noformat, pick_done_transition, pick_resolution, safe_inline,
 )
 

@@ -1,10 +1,10 @@
 import pytest
 
-import tickets
-from assistant import Triage
-from config import ConfigError
 from fakes import BOT_USER_ID, FakeJira, make_config
-from reports import build_report
+from helpdesk import tickets
+from helpdesk.assistant import Triage
+from helpdesk.config import ConfigError
+from helpdesk.reports import build_report
 
 
 def test_report_counts_from_jira():

@@ -1,7 +1,7 @@
 # Setup guide
 
 How to run the Slack + Jira IT Help Desk Bot in your own lab. For what the bot does and how it works, see the
-[README](README.md).
+[README](../README.md).
 
 **You'll need** about 45 minutes, Python 3.11 or newer (3.12 recommended), and free accounts for Slack and Jira. An
 OpenAI API key is optional.
@@ -47,7 +47,7 @@ tickets. It just uses keyword rules for triage and doesn't post troubleshooting 
 
 ## 4. Configure
 
-Copy the template, then fill it in. Every setting is explained in [`.env.example`](.env.example).
+Copy the template, then fill it in. Every setting is explained in [`.env.example`](../.env.example).
 
 ```powershell
 Copy-Item .env.example .env      # macOS/Linux: cp .env.example .env
@@ -66,7 +66,7 @@ JIRA_API_TOKEN=…
 JIRA_PROJECT_KEY=IT
 ```
 
-Then edit [`it_environment.md`](it_environment.md) to describe your lab's tools, so the AI's advice fits them.
+Then edit [`docs/it_environment.md`](it_environment.md) to describe your lab's tools, so the AI's advice fits them.
 
 ## 5. Run
 
@@ -75,7 +75,7 @@ With [uv](https://docs.astral.sh/uv/):
 ```bash
 uv venv
 uv pip install -r requirements.txt
-uv run python bot.py
+uv run python -m helpdesk
 ```
 
 Or with plain pip:
@@ -84,7 +84,7 @@ Or with plain pip:
 python -m venv .venv
 .venv\Scripts\activate          # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-python bot.py
+python -m helpdesk
 ```
 
 On startup the bot checks the Jira credentials and project, finds the channel, and warns you if it hasn't been
@@ -125,7 +125,7 @@ In your IT channel:
 | `OPENAI_API_KEY` | | | Turns on AI triage and replies |
 | `OPENAI_MODEL` | | `gpt-6-luna` | Any chat model that supports JSON mode |
 | `AI_ALLOWED_LINK_DOMAINS` | | | Comma-separated. If set, links in AI replies to other domains are removed |
-| `IT_ENVIRONMENT_FILE` | | `it_environment.md` | Context for the AI |
+| `IT_ENVIRONMENT_FILE` | | `docs/it_environment.md` | Context for the AI |
 | `ESCALATION_MENTION` | | "The IT team" | `<@U…>` or `<!subteam^S…>` to ping on escalation |
 | `IT_STAFF` | | | Comma-separated member IDs (`U…`) and user group IDs (`S…`) of IT staff. Only their replies stop the AI. If empty, anyone but the requester does. See below |
 | `MAX_AI_FOLLOW_UPS` | | `3` | AI replies per ticket after the first answer |
@@ -171,7 +171,7 @@ look up emails at all.
 ## Deploying
 
 Socket Mode only needs a long-running process that can make outbound connections. It needs no inbound port. The
-`Procfile` (`worker: python bot.py`) works on hosts such as Railway, Render or Heroku. Set the same environment
+`Procfile` (`worker: python -m helpdesk`) works on hosts such as Railway, Render or Heroku. Set the same environment
 variables there instead of using a `.env` file.
 
 **Run only one copy at a time.** If two copies run (for example on your laptop and on a host), Slack splits
