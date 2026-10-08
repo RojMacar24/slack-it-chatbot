@@ -76,7 +76,8 @@ docs/
 ├── SETUP.md               step-by-step setup, every setting, deploying and troubleshooting
 ├── slack-app-manifest.yml creates the Slack app with the right permissions in one step
 ├── it_environment.md      describes your lab's tools, sent to the AI so its advice fits
-└── demo.gif
+├── demo.gif               the demo at the top of this page
+└── jira-sync.png          the Jira-to-Slack screenshot above
 requirements*.in / .txt    dependency ranges, and the hashed lock files generated from them
 ```
 
@@ -114,6 +115,11 @@ person made, such as "Alex Kim moved IT-42 from To Do to In Progress in Jira", i
 bot finds that thread from the link in the ticket description, and checks that the thread really is that ticket's
 before posting. Its own changes are skipped, since it already announced them. When a ticket reaches a Done status,
 its buttons come off, just as if the requester had pressed **That fixed it**.
+
+<p align="center">
+  <img src="docs/jira-sync.png" width="560" alt="A ticket thread in Slack: the bot's IT-10 message with troubleshooting steps and its two buttons, then two notes from the bot saying someone moved IT-10 from In Progress to To Do, and back to In Progress, in Jira. The person's name is blurred.">
+</p>
+<p align="center"><em>Two status changes made in Jira, posted in the ticket's Slack thread within a minute.</em></p>
 
 **No database.** The bot recognises its tickets from its own thread message, which starts with
 "Ticket IT-42 created". The requester is whoever started the thread. Jira is the source of truth for status and
