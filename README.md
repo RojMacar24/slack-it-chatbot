@@ -122,6 +122,7 @@ short-lived:
 
 - tickets still being created
 - each person's latest ticket, for the merge window
+- how many tickets each person opened in the last hour, for the limit
 - which Jira changes have been posted already
 
 A restart forgets those and nothing else. Changes made in Jira while the bot is stopped aren't posted afterwards.
@@ -148,13 +149,15 @@ come off every message in its thread.
 ## Tests
 
 ```bash
+uv venv
 uv pip install -r requirements-dev.txt
 uv run pytest
 ```
 
 The tests use in-memory fakes for Slack, Jira and OpenAI, so they need no accounts or network. One test sends real
 Slack event and button payloads through Bolt's router to check the wiring. GitHub Actions runs the same tests and a
-`pyflakes` lint on every push to `main` and on every pull request (`.github/workflows/tests.yml`).
+`pyflakes` lint on both Linux and Windows, on every push to `main` and every pull request
+(`.github/workflows/tests.yml`).
 
 ## Ideas for extending the lab
 
@@ -162,7 +165,7 @@ Slack event and button payloads through Bolt's router to check the wiring. GitHu
   Slack could go back as a comment visible to the requester.
 - **Knowledge base:** search Confluence or a docs folder and include the matching articles in the AI prompt.
 - **Jira Service Management:** map incident and request types to JSM request types and SLAs.
-- **Another AI provider:** everything model-specific is in `assistant.py`.
+- **Another AI provider:** everything model-specific is in `helpdesk/assistant.py`.
 
 See [SECURITY.md](SECURITY.md) for how data and credentials are handled.
 

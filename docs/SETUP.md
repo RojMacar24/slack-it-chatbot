@@ -34,8 +34,16 @@ OpenAI API key is optional.
    **Company-managed**. Name it, for example, *IT Help Desk*, with the key **`IT`**.
    - For a Jira Service Management project, set `JIRA_ISSUE_TYPE` and `JIRA_REQUEST_ISSUE_TYPE` to its issue type
      names.
-3. **Create an API token** at <https://id.atlassian.com/manage-profile/security/api-tokens>. Click **Create API
-   token**, the plain option, not "with scopes", and copy it.
+3. **Give the bot its own Jira account** (recommended). With an admin's token, the bot could change anything on
+   your Jira site. Instead, invite a new user and add it to the project with a role that can create, edit, comment on
+   and move issues, but not administer it (*Member* in a team-managed space).
+   - No second email address? Gmail and Outlook deliver mail for `you+itbot@gmail.com` to `you@gmail.com`, but
+     Atlassian treats it as a separate account.
+   - Give it a name like *IT Help Desk Bot*, since that name appears on its tickets and comments.
+   - Sign in as that user in a private browser window for the next step.
+4. **Create an API token** at <https://id.atlassian.com/manage-profile/security/api-tokens>, signed in as the bot's
+   account. Click **Create API token**, the plain option, not "with scopes", and copy it. Note its expiry date and
+   set a reminder to replace it before then.
 
 On **Jira Data Center**, create a personal access token instead and leave `JIRA_EMAIL` empty.
 
@@ -61,7 +69,7 @@ SLACK_BOT_TOKEN=xoxb-…
 SLACK_APP_TOKEN=xapp-…
 IT_CHANNEL=it-help
 JIRA_BASE_URL=https://your-site.atlassian.net
-JIRA_EMAIL=the email you use for Atlassian
+JIRA_EMAIL=the email of the bot's Atlassian account
 JIRA_API_TOKEN=…
 JIRA_PROJECT_KEY=IT
 ```
@@ -87,8 +95,14 @@ pip install -r requirements.txt
 python -m helpdesk
 ```
 
-On startup the bot checks the Jira credentials and project, finds the channel, and warns you if it hasn't been
-invited yet. A setting that's missing or wrong stops it with a one-line explanation.
+On startup the bot:
+
+- checks the Jira credentials and project
+- finds the channel, and warns you if the bot hasn't been invited yet
+- logs whether it may set the Jira reporter
+
+A setting that's missing or wrong, or an `IT_STAFF` user group it can't read, stops it with a one-line explanation.
+Press **Ctrl+C** to stop it.
 
 ## 6. Try it
 
