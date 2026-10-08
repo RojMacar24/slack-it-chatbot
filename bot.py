@@ -7,6 +7,7 @@ as comments, and lets the requester close or escalate the ticket with buttons.
 """
 
 import logging
+import math
 import re
 import threading
 import time
@@ -22,7 +23,7 @@ import reports
 import tickets
 from assistant import Assistant, CutOffAnswer, is_small_talk
 from config import ConfigError, load_config
-from jira_client import JiraClient, JiraError, is_done, noformat, safe_inline
+from jira_client import JiraClient, JiraError, account_id, is_done, noformat, safe_inline
 from text_utils import redact_secrets, slack_to_plain, to_slack_mrkdwn
 
 logger = logging.getLogger("it_bot")
@@ -141,6 +142,8 @@ class HelpDesk:
         self._opening = {}  # thread ts -> Event, for top-level posts still being turned into tickets
         self._recent_tickets = {}  # user ID -> (TicketRef, ts of their latest post on it), for merging split posts
         self._tickets_opened = {}  # user ID -> deque of when they opened tickets in the last hour, for the limit
+        self._jira_seen = {}  # ticket key -> newest Jira changelog entry already relayed to Slack (0: none yet)
+        self._my_jira_id = None  # the bot's own Jira account, whose changes aren't relayed
 
     def register(self, app):
         @app.event("message")
@@ -361,6 +364,8 @@ class HelpDesk:
 
         logger.info("Opened %s (%s, %s) for %s", key, triage.kind, triage.category, requester)
         self._count_ticket(requester, source_ts)
+        with self._state_lock:
+            self._jira_seen[key] = 0  # brand new, so every change made in Jira is worth relaying
         ticket = tickets.TicketRef(key=key, creator=requester, thread_ts=thread_ts)
         reply = self._format_ai(ai_reply) if ai_reply else ""
         blocks = tickets.ticket_blocks(ticket, self.jira.browse_url(key), triage, reply, secret_removed=text != plain)
@@ -496,6 +501,68 @@ class HelpDesk:
         self._comment(ticket.key, f"{self._jira_name(user)} escalated this from Slack. The AI assistant has stopped replying.")
         who = self.config.escalation_mention or "The IT team"
         return f":sos: <{self.jira.browse_url(ticket.key)}|{ticket.key}> has been escalated. {who} will take it from here.", None
+
+    # --- Jira to Slack -----------------------------------------------------------------------------------------
+
+    def sync_from_jira(self):
+        """Relay status changes that people made in Jira to the tickets' Slack threads, and take the buttons off
+        tickets closed there. Runs every JIRA_SYNC_SECONDS. Socket Mode has no public URL for a Jira webhook, so
+        this asks Jira what changed recently. The bot's own changes are skipped: it already said so in the thread."""
+        minutes = max(5, math.ceil(3 * self.config.jira_sync_seconds / 60))  # overlap, in case a run starts late
+        jql = (f'project = "{self.config.jira_project_key}" AND labels = "{self.config.jira_label}" '
+               f"AND updated >= -{minutes}m ORDER BY updated ASC")
+        try:
+            if self._my_jira_id is None:
+                self._my_jira_id = account_id(self.jira.myself())
+            issues = self.jira.search(jql, ["status"], expand="changelog")
+        except JiraError as exc:
+            logger.warning("Couldn't check Jira for changes: %s", exc)
+            return
+        for issue in issues:
+            changes = self._new_status_changes(issue)
+            if not changes:
+                continue
+            try:
+                self._relay_jira_changes(issue, changes)
+            except (JiraError, *SLACK_FAILURES) as exc:
+                logger.warning("Couldn't relay the Jira changes to %s to Slack: %s", issue["key"], exc)
+
+    def _new_status_changes(self, issue):
+        """Status changes to `issue` that haven't been relayed yet and weren't made by the bot, as
+        (who, from, to). Marks them relayed, so a failure to post isn't retried every minute."""
+        histories = sorted((issue.get("changelog") or {}).get("histories") or [], key=lambda h: int(h["id"]))
+        with self._state_lock:
+            seen = self._jira_seen.get(issue["key"])
+            self._jira_seen[issue["key"]] = max([seen or 0] + [int(h["id"]) for h in histories])
+        if seen is None:
+            return []  # first look since the bot started: anything older happened while it wasn't watching
+        return [
+            ((history.get("author") or {}).get("displayName") or "Someone", item.get("fromString"), item.get("toString"))
+            for history in histories
+            if int(history["id"]) > seen and account_id(history.get("author") or {}) != self._my_jira_id
+            for item in history.get("items") or []
+            if item.get("field") == "status"
+        ]
+
+    def _relay_jira_changes(self, issue, changes):
+        key = issue["key"]
+        thread = tickets.slack_thread_in(self.jira.get_issue(key, ("description",)).get("description"))
+        if not thread or thread[0] != self.channel_id:
+            logger.warning("%s changed in Jira, but its description doesn't link to a thread in the IT channel", key)
+            return
+        channel, thread_ts = thread
+        with self._thread_locks(thread_ts):
+            messages = self.slack.conversations_replies(channel=channel, ts=thread_ts, limit=200)["messages"]
+            ticket = tickets.find_ticket(messages, self.bot_user_id)
+            if not ticket or ticket.key != key:
+                logger.warning("%s changed in Jira, but the Slack thread it links to isn't its ticket thread", key)
+                return
+            closed = is_done(issue.get("fields") or {})
+            self.slack.chat_postMessage(channel=channel, thread_ts=thread_ts, unfurl_links=False, unfurl_media=False,
+                                        text=tickets.jira_changes_text(key, self.jira.browse_url(key), changes, closed))
+            if closed:
+                self._remove_buttons(channel, thread_ts)
+                self._forget(ticket)
 
     # --- Reports -----------------------------------------------------------------------------------------------
 
@@ -651,10 +718,16 @@ def _slack_error(exc):
     return (response.get("error") if response is not None else None) or "unknown error"
 
 
-def schedule_weekly_report(desk, config):
-    """A scheduler (not yet started) that posts the report to the IT channel once a week."""
-    scheduler = BackgroundScheduler(timezone=config.report_timezone)
-    scheduler.add_job(desk.post_weekly_report, "cron", day_of_week=config.report_day, hour=config.report_hour)
+def schedule_jobs(desk, config):
+    """A scheduler (not yet started) with whichever of these are turned on: the weekly report and the Jira sync."""
+    scheduler = BackgroundScheduler(timezone=config.report_timezone if config.report_enabled else "UTC")
+    if config.report_enabled:
+        scheduler.add_job(desk.post_weekly_report, "cron", id="weekly_report",
+                          day_of_week=config.report_day, hour=config.report_hour)
+    if config.jira_sync_seconds:
+        # One run at a time: if Jira is slow, the next run waits instead of piling up
+        scheduler.add_job(desk.sync_from_jira, "interval", id="jira_sync", seconds=config.jira_sync_seconds,
+                          max_instances=1, coalesce=True)
     return scheduler
 
 
@@ -699,10 +772,14 @@ def main():
                     len(config.it_staff_groups))
     desk.check_reporter_permission()
     desk.register(app)
+    scheduler = schedule_jobs(desk, config)
+    if scheduler.get_jobs():
+        scheduler.start()
     if config.report_enabled:
-        schedule_weekly_report(desk, config).start()
         logger.info("Weekly report scheduled for %s at %02d:00 %s", config.report_day, config.report_hour,
                     config.report_timezone)
+    if config.jira_sync_seconds:
+        logger.info("Checking Jira for status changes every %d seconds", config.jira_sync_seconds)
 
     logger.info("Watching %s for IT requests", config.it_channel)
     SocketModeHandler(app, config.slack_app_token).start()

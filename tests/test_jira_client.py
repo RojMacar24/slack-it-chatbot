@@ -5,7 +5,7 @@ import pytest
 import requests
 
 from jira_client import (
-    JiraClient, JiraError, is_done, noformat, pick_done_transition, pick_resolution, safe_inline,
+    JiraClient, JiraError, account_id, is_done, noformat, pick_done_transition, pick_resolution, safe_inline,
 )
 
 
@@ -227,6 +227,18 @@ def test_cloud_search_follows_page_tokens():
     )
     assert [i["key"] for i in jira.search("project = IT", ["status"])] == ["IT-1", "IT-2"]
     assert session.requests[1][2]["params"]["nextPageToken"] == "p2"
+
+
+def test_search_can_expand_the_changelog():
+    jira, session = client(("GET", "/rest/api/3/search/jql", FakeResponse(200, {"issues": []})))
+    jira.search("project = IT", ["status"], expand="changelog")
+    assert session.requests[0][2]["params"]["expand"] == "changelog"
+
+
+def test_account_id_on_cloud_and_data_center():
+    assert account_id({"accountId": "5b10a", "displayName": "Sam"}) == "5b10a"
+    assert account_id({"key": "JIRAUSER10100", "name": "sriv"}) == "JIRAUSER10100"
+    assert account_id({"name": "sriv"}) == "sriv"
 
 
 def test_data_center_search_pages_by_offset():

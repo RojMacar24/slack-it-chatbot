@@ -102,6 +102,7 @@ In your IT channel:
 | Post twice, about 10 seconds apart | One ticket. The second post gets "Added to ticket…" with a link back |
 | Press **✅ That fixed it** | The Jira ticket moves to Done and the buttons disappear |
 | Press **🆘 Escalate to IT** on another ticket | The ticket gets the `escalated` label and the AI stops replying |
+| In Jira, move an open ticket to *In Progress*, then *Done* | Within a minute, the Slack thread says who moved it, and the buttons disappear once it's done |
 | Post `@IT Help Desk report` | A summary of the last 7 days |
 
 ## Settings
@@ -129,6 +130,7 @@ In your IT channel:
 | `IT_STAFF` | | | Comma-separated member IDs (`U…`) and user group IDs (`S…`) of IT staff. Only their replies stop the AI. If empty, anyone but the requester does. See below |
 | `MAX_AI_FOLLOW_UPS` | | `3` | AI replies per ticket after the first answer |
 | `MERGE_WINDOW_SECONDS` | | `120` | Extra posts from the same person within this time join their last ticket. `0` turns it off |
+| `JIRA_SYNC_SECONDS` | | `60` | How often to check Jira for status changes to post in Slack. `0` turns it off; otherwise at least `10` |
 | `MAX_TICKETS_PER_HOUR` | | `10` | Tickets one person can open per hour. Past that, the bot asks them to use an open ticket. `0` turns the limit off |
 | `REPORT_ENABLED` / `REPORT_DAY` / `REPORT_HOUR` / `REPORT_TIMEZONE` | | `true` / `mon` / `9` / `UTC` | Weekly report schedule |
 
@@ -190,6 +192,7 @@ into one ticket, and both copies post the weekly report. Stop the local copy bef
 | Buttons do nothing | Interactivity is off in the Slack app settings (the manifest turns it on) |
 | A ticket has no buttons in Slack | Slack rejected the formatted message, so the bot posted plain text instead. The bot's log says why |
 | A Jira comment says "The bot couldn't post this ticket in Slack" | Slack was unreachable or refused the message. The requester wasn't told, so contact them. The bot's log has the error |
+| A status change in Jira never shows up in Slack | It was made while the bot was stopped, or by the bot's own Jira account, or `JIRA_SYNC_SECONDS` is `0`. If the bot's log says the description "doesn't link to a thread", someone removed the *Slack thread:* line from the ticket |
 | A coworker's reply stops the AI | `IT_STAFF` isn't set. List your IT staff there |
 | `Couldn't read the IT_STAFF user groups` at startup | The app needs the `usergroups:read` scope (then reinstall it), and user groups need a paid Slack plan. Or list member IDs instead |
 | Private channel not found | Use the channel ID in `IT_CHANNEL`, add `groups:history` and `groups:read`, and subscribe to `message.groups` |

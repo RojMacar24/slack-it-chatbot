@@ -45,9 +45,13 @@ class JiraClient:
 
     def check_connection(self, project_key):
         """Confirm the credentials work and the project exists. Returns the Jira user's display name."""
-        me = self._request("GET", "/rest/api/2/myself")
+        me = self.myself()
         self._request("GET", f"/rest/api/2/project/{project_key}")
         return me.get("displayName") or me.get("name") or "unknown user"
+
+    def myself(self):
+        """This account, as Jira describes it. account_id() picks out what identifies it."""
+        return self._request("GET", "/rest/api/2/myself")
 
     def has_permission(self, project_key, permission):
         """Whether this account has a project permission, such as MODIFY_REPORTER."""
@@ -123,10 +127,13 @@ class JiraClient:
         self._request("POST", f"/rest/api/2/issue/{key}/transitions", json=payload)
         return True
 
-    def search(self, jql, fields, max_issues=1000):
-        """Return up to `max_issues` issues matching `jql`, each as Jira returns it ({"key", "fields", ...})."""
+    def search(self, jql, fields, max_issues=1000, expand=None):
+        """Return up to `max_issues` issues matching `jql`, each as Jira returns it ({"key", "fields", ...}).
+        `expand="changelog"` adds each issue's change history."""
         issues = []
         params = {"jql": jql, "fields": ",".join(fields), "maxResults": 100}
+        if expand:
+            params["expand"] = expand
         if self.is_cloud:
             while len(issues) < max_issues:
                 page = self._request("GET", "/rest/api/3/search/jql", params=params)
@@ -193,6 +200,12 @@ def pick_resolution(allowed_values):
     names = [v.get("name", "") for v in allowed_values if v.get("name")]
     usable = [name for name in names if not _CANCEL_WORDS.search(name)]
     return next((name for name in usable if _RESOLVED_WORDS.search(name)), (usable or names or ["Done"])[0])
+
+
+def account_id(user):
+    """What identifies a Jira user, such as a changelog author or myself(): accountId on Cloud, key or name on
+    Data Center."""
+    return user.get("accountId") or user.get("key") or user.get("name")
 
 
 def is_done(fields):

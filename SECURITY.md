@@ -28,6 +28,11 @@ thread reply or an extra post added to a ticket, is then asked to delete the mes
 reply, that request is a private message only they can see. This is best-effort pattern matching, so tell users
 never to post credentials.
 
+Status names and display names coming back from Jira are escaped before they're posted, so they can't `@channel`
+or fake a link. The bot only posts them in a thread that the ticket's description links to, in the IT channel, and
+only after checking that the thread holds that ticket's own message. That way an edited description can't point it
+somewhere else.
+
 Message text goes into Jira inside a `{noformat}` block, so Jira shows it as written. Slack display names are
 stripped of Jira's link and formatting characters first, because anyone can set their display name to Jira markup.
 
@@ -90,7 +95,8 @@ What the bot doesn't protect against, or only partly:
   Prepaid OpenAI credit with auto-recharge off is the hard cap on AI spending.
 - **IT staff are who `IT_STAFF` says they are.** Without it, any reply from someone other than the requester stops
   the AI. That's a nuisance, not a security risk, since the AI only ever helps the requester.
-- **Changes made in Jira don't reach Slack** (#6). Closing a ticket in Jira doesn't update its Slack thread.
+- **Only status changes come back from Jira, and only while the bot runs.** Comments and other edits made in Jira
+  stay in Jira. Jira users' display names appear in the Slack thread when they change a status.
 - **The reporter is often the bot's Jira account.** Making the requester the reporter needs the *Modify Reporter*
   permission and a visible, exactly matching email, which Jira Cloud usually hides. The bot never accepts a partial
   or ambiguous match, because the wrong reporter would get the ticket's notifications.

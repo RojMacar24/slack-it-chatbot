@@ -70,7 +70,11 @@ class FakeSlack:
         return {"ok": True}
 
     def chat_getPermalink(self, channel, message_ts):
-        return {"permalink": f"https://slack.example/archives/{channel}/p{message_ts.replace('.', '')}"}
+        """Like Slack's: a link to a reply also names its thread."""
+        link = f"https://slack.example/archives/{channel}/p{message_ts.replace('.', '')}"
+        parent = next((ts for ts, messages in self.threads.items()
+                       if ts != message_ts and any(m["ts"] == message_ts for m in messages)), None)
+        return {"permalink": link + (f"?thread_ts={parent}&cid={channel}" if parent else "")}
 
     def conversations_replies(self, channel, ts, limit=None):
         return {"messages": copy.deepcopy(self.threads.get(ts, []))}
@@ -88,11 +92,16 @@ class FakeSlack:
         return {"users": list(self.groups.get(usergroup, []))}
 
 
+BOT_JIRA_ACCOUNT = "acct-bot"
+
+
 class FakeJira:
     base_url = "https://jira.example"
 
     def __init__(self):
         self.issues = {}
+        self.histories = {}  # key -> changelog histories, like search(expand="changelog") returns them
+        self._next_history_id = 10000
         self.created = []
         self.comments = []
         self.fail_create = False
@@ -117,8 +126,23 @@ class FakeJira:
         key = f"{project_key}-{len(self.created) + 1}"
         self.created.append({"key": key, "issue_type": issue_type, "summary": summary, "description": description,
                              "labels": list(labels), "priority": priority, "reporter": reporter})
-        self.issues[key] = {"status": {"statusCategory": {"key": "new"}}, "labels": list(labels)}
+        self.issues[key] = {"status": {"name": "To Do", "statusCategory": {"key": "new"}}, "labels": list(labels),
+                            "description": description}
         return key
+
+    def myself(self):
+        return {"accountId": BOT_JIRA_ACCOUNT, "displayName": "IT Help Desk Bot"}
+
+    def change_status(self, key, name, category="indeterminate", by="acct-alex", who="Alex Kim"):
+        """Someone (by default a person, not the bot) moves the issue to another status in Jira."""
+        old = self.issues[key]["status"].get("name")
+        self.issues[key]["status"] = {"name": name, "statusCategory": {"key": category}}
+        self._next_history_id += 1
+        self.histories.setdefault(key, []).append({
+            "id": str(self._next_history_id),
+            "author": {"accountId": by, "displayName": who},
+            "items": [{"field": "status", "fromString": old, "toString": name}],
+        })
 
     def get_issue(self, key, fields=("status", "labels")):
         return copy.deepcopy(self.issues[key])
@@ -133,12 +157,16 @@ class FakeJira:
         self.preferred_transition = preferred_name
         if not self.can_transition:
             return False
-        self.issues[key]["status"] = {"statusCategory": {"key": "done"}}
+        self.change_status(key, "Done", "done", by=BOT_JIRA_ACCOUNT, who="IT Help Desk Bot")
         return True
 
-    def search(self, jql, fields):
+    def search(self, jql, fields, expand=None):
         self.last_jql = jql
-        return [{"key": key, "fields": copy.deepcopy(fields)} for key, fields in self.issues.items()]
+        found = [{"key": key, "fields": copy.deepcopy(fields)} for key, fields in self.issues.items()]
+        if expand == "changelog":
+            for issue in found:
+                issue["changelog"] = {"histories": copy.deepcopy(self.histories.get(issue["key"], []))}
+        return found
 
 
 class FakeAssistant:
