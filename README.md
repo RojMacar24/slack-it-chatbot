@@ -35,7 +35,7 @@ A self-contained lab project that automates first-line IT support between Slack 
 - The bot replies in the Slack thread with the ticket link and, if OpenAI is configured, **first troubleshooting steps**.
 - Replies in the thread are **copied into Jira as comments**, so the ticket holds the whole conversation.
 - The requester can press **✅ That fixed it**, which closes the Jira ticket, or **🆘 Escalate to IT**, which labels it and pings your IT group.
-- The AI stops replying as soon as someone from IT joins the thread, the ticket is escalated or closed, or it has run out of attempts.
+- The AI stops replying as soon as someone from IT joins the thread (a coworker's "+1" doesn't count), the ticket is escalated or closed, or it has run out of attempts.
 - A **weekly report**, built from Jira data, is posted to the channel. You can also get one any time with `@IT Help Desk report`.
 
 It runs over Slack **Socket Mode**, so it needs no public URL, web server or database. You can run it on a laptop.
@@ -103,7 +103,8 @@ those and nothing else.
 
 **When the AI stays quiet.** It only replies to the person who opened the ticket, and only on incidents. It stops when:
 
-- anyone else (such as IT staff) replies in the thread
+- someone from IT replies in the thread. Set `IT_STAFF` to say who that is; then a coworker's "+1, same here"
+  doesn't silence it. Without `IT_STAFF`, a reply from anyone but the requester counts
 - the ticket is escalated or closed
 - it has used up `MAX_AI_FOLLOW_UPS`, after which it posts one final suggestion to escalate
 

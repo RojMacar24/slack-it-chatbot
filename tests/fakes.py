@@ -31,6 +31,7 @@ class FakeSlack:
         self.calls = []
         self.threads = {}  # parent ts -> messages, parent first (like conversations.replies)
         self.names = {}
+        self.groups = {}  # user group ID -> member IDs
         self._clock = 1000
 
     def next_ts(self):
@@ -75,6 +76,13 @@ class FakeSlack:
 
     def users_info(self, user):
         return {"user": {"id": user, "real_name": self.names.get(user, user)}}
+
+    def usergroups_users_list(self, usergroup):
+        """Members of `usergroup` from `groups`. Raises like Slack does when the app lacks usergroups:read."""
+        self.calls.append(("usergroups_users_list", {"usergroup": usergroup}))
+        if getattr(self, "groups_missing_scope", False):
+            raise SlackApiError("missing_scope", {"ok": False, "error": "missing_scope"})
+        return {"users": list(self.groups.get(usergroup, []))}
 
 
 class FakeJira:

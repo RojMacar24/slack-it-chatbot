@@ -11,7 +11,7 @@ from slack_sdk.errors import SlackApiError
 
 import tickets
 from assistant import Assistant, CutOffAnswer
-from bot import HelpDesk, check_channel_access, is_report_command, resolve_channel_id, schedule_weekly_report
+from bot import ITStaff, HelpDesk, check_channel_access, is_report_command, resolve_channel_id, schedule_weekly_report
 from config import ConfigError
 from fakes import BOT_USER_ID, CHANNEL_ID, FakeAssistant, FakeJira, FakeSlack, make_config
 from jira_client import JiraError
@@ -80,6 +80,10 @@ def click(desk, slack, thread_ts, action_id, user=REQUESTER, nth=0):
 
 def last_post(slack):
     return slack.calls_to("chat_postMessage")[-1]
+
+
+def desk_with(slack, jira, ai, **overrides):
+    return HelpDesk(make_config(**overrides), slack, jira, ai, BOT_USER_ID, CHANNEL_ID)
 
 
 # --- Opening tickets ---------------------------------------------------------------------------------------------
@@ -213,6 +217,62 @@ def test_ai_stays_quiet_once_someone_from_it_joins(desk, slack, jira, ai):
 
     assert ai.histories == []
     assert [key for key, _ in jira.comments].count("IT-1") == 3  # first AI reply + both Slack replies
+
+
+COWORKER = "UCOWORKER"
+
+
+@pytest.mark.parametrize("staff_setting", ["UENG", "<@UENG|alex>", "S0ITTEAM"])
+def test_with_it_staff_set_only_their_replies_silence_the_ai(slack, jira, ai, staff_setting):
+    slack.groups["S0ITTEAM"] = [ENGINEER]
+    desk = desk_with(slack, jira, ai, IT_STAFF=staff_setting)
+    ts = post(desk, slack, "VPN won't connect")
+    reply(desk, slack, ts, "+1, same here", user=COWORKER)
+    reply(desk, slack, ts, "Restarted it, still failing")
+    assert len(ai.histories) == 1  # the coworker didn't stop the AI...
+    assert all(m["content"] != "+1, same here" for m in ai.histories[0])  # ...and isn't part of its conversation
+
+    reply(desk, slack, ts, "Looking into it now", user=ENGINEER)
+    reply(desk, slack, ts, "Thanks!")
+    assert len(ai.histories) == 1  # IT staff did
+    mirrored = [body.splitlines()[0] for key, body in jira.comments if "replied in Slack" in body]
+    assert mirrored.count("UCOWORKER replied in Slack:") == 1 and mirrored.count("UENG replied in Slack:") == 1
+
+
+def test_it_staff_member_opening_their_own_ticket_still_gets_ai_help(slack, jira, ai):
+    desk = desk_with(slack, jira, ai, IT_STAFF=ENGINEER)
+    ts = post(desk, slack, "VPN won't connect", user=ENGINEER)
+    reply(desk, slack, ts, "Restarted it, still failing", user=ENGINEER)
+    assert len(ai.histories) == 1
+
+
+def test_it_staff_groups_are_read_again_after_a_while(slack):
+    now = [0.0]
+    slack.groups["S0ITTEAM"] = [ENGINEER]
+    staff = ITStaff(slack, users=["UBOSS"], groups=["S0ITTEAM"], clock=lambda: now[0])
+    assert ENGINEER in staff and "UBOSS" in staff and COWORKER not in staff
+
+    slack.groups["S0ITTEAM"] = [COWORKER]
+    assert COWORKER not in staff  # still the cached list
+    now[0] += ITStaff.REFRESH_SECONDS
+    assert COWORKER in staff and ENGINEER not in staff
+    assert len(slack.calls_to("usergroups_users_list")) == 2
+
+
+def test_unreadable_it_staff_groups_stop_startup_with_a_fix_and_keep_the_last_list_later(slack, caplog):
+    now = [0.0]
+    slack.groups["S0ITTEAM"] = [ENGINEER]
+    staff = ITStaff(slack, groups=["S0ITTEAM"], clock=lambda: now[0])
+    staff.load()
+    assert ENGINEER in staff
+
+    slack.groups_missing_scope = True
+    now[0] += ITStaff.REFRESH_SECONDS
+    assert ENGINEER in staff
+    assert "using the last list" in caplog.text
+    with pytest.raises(ConfigError, match=r"\(missing_scope\).*usergroups:read"):
+        ITStaff(slack, groups=["S0ITTEAM"]).load()
+    ITStaff(slack, users=[ENGINEER]).load()  # nothing to read without groups
 
 
 def test_ignores_threads_without_a_ticket(desk, slack, jira, ai):
@@ -480,10 +540,6 @@ def test_jira_errors_arent_shown_to_users(desk, slack, jira):
 
 
 # --- Ticket limit ----------------------------------------------------------------------------------------------
-
-def desk_with(slack, jira, ai, **overrides):
-    return HelpDesk(make_config(**overrides), slack, jira, ai, BOT_USER_ID, CHANNEL_ID)
-
 
 def test_ticket_limit_blocks_the_next_ticket_until_an_hour_has_passed(slack, jira, ai):
     desk = desk_with(slack, jira, ai, MAX_TICKETS_PER_HOUR="2", MERGE_WINDOW_SECONDS="0")

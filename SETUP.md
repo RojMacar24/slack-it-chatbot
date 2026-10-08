@@ -125,10 +125,27 @@ In your IT channel:
 | `AI_ALLOWED_LINK_DOMAINS` | | | Comma-separated. If set, links in AI replies to other domains are removed |
 | `IT_ENVIRONMENT_FILE` | | `it_environment.md` | Context for the AI |
 | `ESCALATION_MENTION` | | "The IT team" | `<@U…>` or `<!subteam^S…>` to ping on escalation |
+| `IT_STAFF` | | | Comma-separated member IDs (`U…`) and user group IDs (`S…`) of IT staff. Only their replies stop the AI. If empty, anyone but the requester does. See below |
 | `MAX_AI_FOLLOW_UPS` | | `3` | AI replies per ticket after the first answer |
 | `MERGE_WINDOW_SECONDS` | | `120` | Extra posts from the same person within this time join their last ticket. `0` turns it off |
 | `MAX_TICKETS_PER_HOUR` | | `10` | Tickets one person can open per hour. Past that, the bot asks them to use an open ticket. `0` turns the limit off |
 | `REPORT_ENABLED` / `REPORT_DAY` / `REPORT_HOUR` / `REPORT_TIMEZONE` | | `true` / `mon` / `9` / `UTC` | Weekly report schedule |
+
+### Telling IT staff apart from coworkers
+
+When someone other than the requester replies in a ticket thread, the AI steps back so it doesn't talk over IT. By
+default that includes a coworker writing "+1, same here". To make only IT staff count, list them in `IT_STAFF`:
+
+- **People:** in Slack, open someone's profile, click **⋮** (More), then **Copy member ID**. It looks like `U0123ABCD`.
+- **A user group** such as `@it-team` (paid Slack plans only): copy its ID, which starts with `S`, from the group's
+  page. Then add the `usergroups:read` scope under **OAuth & Permissions** and reinstall the app. The bot re-reads
+  group members every 5 minutes.
+
+```dotenv
+IT_STAFF=U0123ABCD, U0456EFGH
+```
+
+Everyone's replies are still copied to Jira either way.
 
 ## Deploying
 
@@ -154,4 +171,6 @@ into one ticket, and both copies post the weekly report. Stop the local copy bef
 | Buttons do nothing | Interactivity is off in the Slack app settings (the manifest turns it on) |
 | A ticket has no buttons in Slack | Slack rejected the formatted message, so the bot posted plain text instead. The bot's log says why |
 | A Jira comment says "The bot couldn't post this ticket in Slack" | Slack was unreachable or refused the message. The requester wasn't told, so contact them. The bot's log has the error |
+| A coworker's reply stops the AI | `IT_STAFF` isn't set. List your IT staff there |
+| `Couldn't read the IT_STAFF user groups` at startup | The app needs the `usergroups:read` scope (then reinstall it), and user groups need a paid Slack plan. Or list member IDs instead |
 | Private channel not found | Use the channel ID in `IT_CHANNEL`, add `groups:history` and `groups:read`, and subscribe to `message.groups` |

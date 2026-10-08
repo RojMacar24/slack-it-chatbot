@@ -122,6 +122,22 @@ def test_jira_url_must_be_https(url):
         make_config(JIRA_BASE_URL=url)
 
 
+def test_it_staff_accepts_ids_and_mentions():
+    config = make_config(IT_STAFF=" U012AB, <@W034CD|sam> ,, S056EF, <!subteam^S078GH|@it-team> ")
+    assert config.it_staff_users == ("U012AB", "W034CD")
+    assert config.it_staff_groups == ("S056EF", "S078GH")
+    assert make_config().it_staff_users == () and make_config().it_staff_groups == ()
+
+
+def test_human_took_over_with_and_without_staff():
+    thread = [{"ts": "1", "user": "UREQ"}, {"ts": "2", "user": BOT_USER_ID, "bot_id": "B"},
+              {"ts": "3", "user": "UCOWORKER", "text": "+1"}]
+    assert tickets.human_took_over(thread, "UREQ", BOT_USER_ID)
+    assert not tickets.human_took_over(thread, "UREQ", BOT_USER_ID, staff={"UENG"})
+    assert tickets.human_took_over(thread + [{"ts": "4", "user": "UENG"}], "UREQ", BOT_USER_ID, staff={"UENG"})
+    assert not tickets.human_took_over(thread, "UCOWORKER", BOT_USER_ID, staff={"UCOWORKER"})  # their own ticket
+
+
 def test_allowed_link_domains_are_normalised():
     config = make_config(AI_ALLOWED_LINK_DOMAINS=" Microsoft.com, *.docs.example.org ,, .zoom.us. ")
     assert config.ai_allowed_link_domains == ("microsoft.com", "docs.example.org", "zoom.us")
@@ -134,6 +150,8 @@ def test_allowed_link_domains_are_normalised():
     ({"SLACK_APP_TOKEN": "xoxb-wrong"}, "xapp-"),
     ({"MAX_AI_FOLLOW_UPS": "lots"}, "whole number"),
     ({"JIRA_LABEL": "two words"}, "spaces"),
+    ({"IT_STAFF": "U012AB, @alex"}, "IT_STAFF entry '@alex' isn't a Slack member ID"),
+    ({"IT_STAFF": "u012ab"}, "IT_STAFF entry 'u012ab'"),
     ({"MAX_TICKETS_PER_HOUR": "-1"}, "MAX_TICKETS_PER_HOUR must be 0"),
     ({"MAX_TICKETS_PER_HOUR": "lots"}, "whole number"),
     ({"REPORT_HOUR": "25"}, "REPORT_HOUR must be between 0 and 23"),
