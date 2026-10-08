@@ -12,5 +12,6 @@ The list below is a sample lab setup. Replace it with what your lab actually run
 - Ticketing: Jira (tickets are created automatically from Slack posts)
 
 Policies:
+
 - Only the IT team can grant admin rights, software licences or access to systems.
 - Lost or stolen devices and suspected phishing should be escalated straight away.
