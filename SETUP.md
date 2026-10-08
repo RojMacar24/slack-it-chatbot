@@ -152,4 +152,6 @@ into one ticket, and both copies post the weekly report. Stop the local copy bef
 | `labels` error when creating | The Labels field isn't on the project's create screen |
 | "couldn't find a way to close" | The workflow has no non-cancel transition to a Done status from the current one. Set `JIRA_DONE_TRANSITION` to the transition's exact name |
 | Buttons do nothing | Interactivity is off in the Slack app settings (the manifest turns it on) |
+| A ticket has no buttons in Slack | Slack rejected the formatted message, so the bot posted plain text instead. The bot's log says why |
+| A Jira comment says "The bot couldn't post this ticket in Slack" | Slack was unreachable or refused the message. The requester wasn't told, so contact them. The bot's log has the error |
 | Private channel not found | Use the channel ID in `IT_CHANNEL`, add `groups:history` and `groups:read`, and subscribe to `message.groups` |

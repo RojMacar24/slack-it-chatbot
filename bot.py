@@ -15,7 +15,7 @@ from functools import lru_cache
 from apscheduler.schedulers.background import BackgroundScheduler
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
-from slack_sdk.errors import SlackApiError
+from slack_sdk.errors import SlackApiError, SlackClientError
 
 import reports
 import tickets
@@ -28,6 +28,8 @@ logger = logging.getLogger("it_bot")
 
 # Message subtypes that still mean "a person posted something". Plain messages have no subtype.
 HANDLED_SUBTYPES = {None, "file_share", "thread_broadcast"}
+# What a Slack call raises when it fails: an API error (SlackApiError is a SlackClientError) or a network problem
+SLACK_FAILURES = (SlackClientError, OSError)
 
 
 def is_report_command(text, bot_user_id):
@@ -303,17 +305,33 @@ class HelpDesk:
         self._count_ticket(requester, source_ts)
         ticket = tickets.TicketRef(key=key, creator=requester, thread_ts=thread_ts)
         reply = self._format_ai(ai_reply) if ai_reply else ""
-        self.slack.chat_postMessage(
-            channel=channel,
-            thread_ts=thread_ts,
-            text=tickets.ticket_text(ticket, triage, reply),
-            blocks=tickets.ticket_blocks(ticket, self.jira.browse_url(key), triage, reply, secret_removed=text != plain),
-            unfurl_links=False,
-            unfurl_media=False,
-        )
-        if ai_reply:
+        blocks = tickets.ticket_blocks(ticket, self.jira.browse_url(key), triage, reply, secret_removed=text != plain)
+        if not self._post_ticket(channel, ticket, tickets.ticket_text(ticket, triage, reply), blocks):
+            note = ("The bot couldn't post this ticket in Slack, so the requester hasn't been told about it. "
+                    "Please contact them directly. The Slack thread is linked above.")
+            if ai_reply:
+                note += "\n\nThe AI's suggested first reply, which wasn't posted:\n" + noformat(ai_reply)
+            self._comment(key, note)
+        elif ai_reply:
             self._comment(key, "AI assistant replied in Slack:\n" + noformat(ai_reply))
-        return ticket
+        return ticket  # it exists in Jira either way, so the requester's next post can still join it
+
+    def _post_ticket(self, channel, ticket, text, blocks):
+        """Post the ticket message. If Slack rejects the formatted version, post the plain text, which still links the
+        thread to the ticket (find_ticket() reads the text) but has no buttons. Returns whether either worked."""
+        try:
+            self.slack.chat_postMessage(channel=channel, thread_ts=ticket.thread_ts, text=text, blocks=blocks,
+                                        unfurl_links=False, unfurl_media=False)
+            return True
+        except SLACK_FAILURES as exc:
+            logger.warning("Slack rejected the message for %s, retrying as plain text: %s", ticket.key, exc)
+        try:
+            self.slack.chat_postMessage(channel=channel, thread_ts=ticket.thread_ts, text=text,
+                                        unfurl_links=False, unfurl_media=False)
+            return True
+        except SLACK_FAILURES as exc:
+            logger.error("Created %s but couldn't tell %s in Slack: %s", ticket.key, ticket.creator, exc)
+            return False
 
     def on_thread_reply(self, event):
         channel, thread_ts, author = event["channel"], event["thread_ts"], event["user"]
