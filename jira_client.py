@@ -17,11 +17,13 @@ _RESOLVED_WORDS = re.compile(r"done|resolv|close|complet|fix", re.IGNORECASE)
 
 
 class JiraError(Exception):
-    """A Jira API call failed. The message includes Jira's own explanation when it gave one."""
+    """A Jira API call failed. The message includes Jira's own explanation when it gave one, and `fields` names the
+    fields Jira rejected, if any."""
 
-    def __init__(self, message, status=None):
+    def __init__(self, message, status=None, fields=()):
         super().__init__(message)
         self.status = status
+        self.fields = tuple(fields)
 
 
 class JiraClient:
@@ -47,8 +49,28 @@ class JiraClient:
         self._request("GET", f"/rest/api/2/project/{project_key}")
         return me.get("displayName") or me.get("name") or "unknown user"
 
-    def create_issue(self, project_key, issue_type, summary, description, labels=(), priority=None):
-        """Create an issue and return its key, e.g. "IT-42"."""
+    def has_permission(self, project_key, permission):
+        """Whether this account has a project permission, such as MODIFY_REPORTER."""
+        found = self._request("GET", "/rest/api/2/mypermissions",
+                              params={"projectKey": project_key, "permissions": permission})["permissions"]
+        return bool((found.get(permission) or {}).get("havePermission"))
+
+    def find_user(self, email):
+        """The account with exactly this email, as a `reporter` for create_issue(), or None.
+
+        Jira's user search also matches the start of names and emails, so only an exact match on a visible email
+        counts. Jira Cloud hides most people's emails from accounts that aren't admins, and then this returns None.
+        """
+        search = {"query": email} if self.is_cloud else {"username": email}
+        users = self._request("GET", "/rest/api/2/user/search", params={**search, "maxResults": 20}) or []
+        matches = [user for user in users
+                   if user.get("active", True) and (user.get("emailAddress") or "").lower() == email.lower()]
+        if len(matches) != 1:
+            return None
+        return {"accountId": matches[0]["accountId"]} if self.is_cloud else {"name": matches[0]["name"]}
+
+    def create_issue(self, project_key, issue_type, summary, description, labels=(), priority=None, reporter=None):
+        """Create an issue and return its key, e.g. "IT-42". `reporter` comes from find_user()."""
         fields = {
             "project": {"key": project_key},
             "issuetype": {"name": issue_type},
@@ -58,14 +80,20 @@ class JiraClient:
         }
         if priority:
             fields["priority"] = {"name": priority}
+        if reporter:
+            fields["reporter"] = reporter
         try:
             return self._request("POST", "/rest/api/2/issue", json={"fields": fields})["key"]
         except JiraError as exc:
-            if not priority or exc.status != 400:
+            optional = [name for name in ("priority", "reporter") if name in fields]
+            if not optional or exc.status != 400:
                 raise
-            # Some projects don't put Priority on the create screen. The ticket matters more than its priority.
-            logger.warning("Jira rejected priority %r, creating the issue without it: %s", priority, exc)
-            del fields["priority"]
+            # Some projects don't put Priority on the create screen, or don't let this account set the reporter.
+            # The ticket matters more than either, so drop what Jira rejected (or both, if it didn't say) and retry.
+            rejected = [name for name in optional if name in exc.fields] or optional
+            logger.warning("Jira rejected the %s, creating the issue without it: %s", " and ".join(rejected), exc)
+            for name in rejected:
+                del fields[name]
             return self._request("POST", "/rest/api/2/issue", json={"fields": fields})["key"]
 
     def get_issue(self, key, fields=("status", "labels")):
@@ -123,20 +151,22 @@ class JiraClient:
         except requests.RequestException as exc:
             raise JiraError(f"{method} {path} failed: {exc}") from exc
         if not response.ok:
-            raise JiraError(f"{method} {path} returned {response.status_code}: {_error_text(response)}", response.status_code)
+            text, fields = _error_details(response)
+            raise JiraError(f"{method} {path} returned {response.status_code}: {text}", response.status_code, fields)
         return response.json() if response.content else None
 
 
-def _error_text(response):
+def _error_details(response):
+    """Jira's explanation of a failed request, and the names of the fields it rejected."""
     try:
         body = response.json()
     except ValueError:
-        return response.text[:300] or response.reason
+        return response.text[:300] or response.reason, ()
     if not isinstance(body, dict):
-        return response.text[:300]
-    messages = list(body.get("errorMessages") or [])
-    messages += [f"{field}: {message}" for field, message in (body.get("errors") or {}).items()]
-    return "; ".join(messages) or response.text[:300]
+        return response.text[:300], ()
+    errors = body.get("errors") or {}
+    messages = list(body.get("errorMessages") or []) + [f"{field}: {message}" for field, message in errors.items()]
+    return "; ".join(messages) or response.text[:300], tuple(errors)
 
 
 def pick_done_transition(transitions, preferred_name=None):

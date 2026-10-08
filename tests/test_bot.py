@@ -128,6 +128,42 @@ def test_access_requests_use_the_request_issue_type_and_get_no_buttons(slack, ji
     assert tickets.without_buttons(blocks) == blocks
 
 
+def test_requester_becomes_the_reporter_when_their_email_matches(desk, slack, jira):
+    slack.emails[REQUESTER] = "Sam@Example.com"
+    jira.accounts["sam@example.com"] = "acct-sam"
+    desk.check_reporter_permission()
+    post(desk, slack, "VPN won't connect")
+    slack._clock += 121
+    post(desk, slack, "Printer is jammed")
+
+    assert [issue["reporter"] for issue in jira.created] == [{"accountId": "acct-sam"}] * 2
+    assert jira.user_lookups == ["sam@example.com"]  # looked up once, then remembered
+    assert "Reported in Slack by UREQ." in jira.created[0]["description"]
+
+
+@pytest.mark.parametrize("setup", ["no_match", "no_slack_email", "no_permission", "turned_off", "lookup_fails"])
+def test_bot_stays_the_reporter_when_the_requester_cant_be_matched(slack, jira, ai, setup):
+    slack.emails[REQUESTER] = "sam@example.com"
+    jira.accounts["sam@example.com"] = "acct-sam"
+    if setup == "no_match":
+        jira.accounts.clear()
+    elif setup == "no_slack_email":
+        slack.emails.clear()  # the app doesn't have users:read.email
+    elif setup == "no_permission":
+        jira.permissions.clear()
+    elif setup == "lookup_fails":
+        def broken(email):
+            raise JiraError("GET /rest/api/2/user/search returned 503: unavailable", 503)
+        jira.find_user = broken
+    desk = desk_with(slack, jira, ai, JIRA_SET_REPORTER="false" if setup == "turned_off" else "true")
+    desk.check_reporter_permission()
+    post(desk, slack, "VPN won't connect")
+
+    assert jira.created[0]["reporter"] is None
+    if setup in ("no_permission", "turned_off", "no_slack_email"):
+        assert jira.user_lookups == []  # nobody's email is sent to Jira for nothing
+
+
 def test_jira_failure_is_reported_in_the_thread(desk, slack, jira):
     jira.fail_create = True
     ts = post(desk, slack, "Printer is jammed")

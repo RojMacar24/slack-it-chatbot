@@ -127,7 +127,10 @@ class HelpDesk:
         self.bot_user_id = bot_user_id
         self.channel_id = channel_id
         self._seen = RecentKeys()
-        self.user_name = lru_cache(maxsize=1024)(self._lookup_user_name)
+        self._slack_user = lru_cache(maxsize=1024)(self._lookup_user)
+        # Errors aren't cached, so a lookup that failed is tried again next time
+        self._jira_account = lru_cache(maxsize=1024)(jira.find_user)
+        self._set_reporter = config.jira_set_reporter  # turned off at startup if Jira won't allow it
         # Without IT_STAFF, a reply from anyone but the requester counts as IT taking over
         has_staff = config.it_staff_users or config.it_staff_groups
         self.it_staff = ITStaff(slack, config.it_staff_users, config.it_staff_groups) if has_staff else None
@@ -344,6 +347,7 @@ class HelpDesk:
                 description=self._description(requester, channel, source_ts, text, len(files)),
                 labels=tickets.ticket_labels(self.config.jira_label, triage),
                 priority=triage.priority if self.config.jira_set_priority else None,
+                reporter=self._reporter(requester),
             )
         except JiraError as exc:
             logger.error("Couldn't create a Jira ticket for message %s: %s", source_ts, exc)
@@ -563,14 +567,47 @@ class HelpDesk:
             logger.warning("Couldn't get a permalink for %s: %s", ts, exc)
             return None
 
-    def _lookup_user_name(self, user_id):
-        try:
-            user = self.slack.users_info(user=user_id)["user"]
-        except SlackApiError as exc:
-            logger.warning("Couldn't look up Slack user %s: %s", user_id, exc)
-            return user_id
+    def user_name(self, user_id):
+        user = self._slack_user(user_id)
         profile = user.get("profile") or {}
         return profile.get("display_name") or user.get("real_name") or user.get("name") or user_id
+
+    def _lookup_user(self, user_id):
+        try:
+            return self.slack.users_info(user=user_id)["user"]
+        except SlackApiError as exc:
+            logger.warning("Couldn't look up Slack user %s: %s", user_id, exc)
+            return {}
+
+    def check_reporter_permission(self):
+        """At startup: making the requester the Jira reporter needs Jira's Modify Reporter permission. Without it,
+        the bot's own account stays the reporter, and nobody's email is looked up."""
+        if not self._set_reporter:
+            return
+        try:
+            allowed = self.jira.has_permission(self.config.jira_project_key, "MODIFY_REPORTER")
+        except JiraError as exc:
+            logger.warning("Couldn't check whether the bot may set the Jira reporter: %s", exc)
+            allowed = False
+        if allowed:
+            logger.info("Tickets are reported by the requester when their Slack email matches a Jira account")
+        else:
+            self._set_reporter = False
+            logger.info("Tickets are reported by the bot's Jira account, which doesn't have the Modify Reporter "
+                        "permission in %s", self.config.jira_project_key)
+
+    def _reporter(self, user_id):
+        """The requester's Jira account, matched by email, or None to leave the bot's account as the reporter."""
+        if not self._set_reporter:
+            return None
+        email = ((self._slack_user(user_id).get("profile") or {}).get("email") or "").strip().lower()
+        if not email:
+            return None  # the Slack app lacks users:read.email, or the account has no email (e.g. a bot)
+        try:
+            return self._jira_account(email)
+        except JiraError as exc:
+            logger.warning("Couldn't look up the Jira account of Slack user %s: %s", user_id, exc)
+            return None
 
 
 def resolve_channel_id(slack, channel):
@@ -660,6 +697,7 @@ def main():
             raise SystemExit(f"Configuration problem: {exc}") from None
         logger.info("IT staff: %d people and %d user groups (IT_STAFF)", len(config.it_staff_users),
                     len(config.it_staff_groups))
+    desk.check_reporter_permission()
     desk.register(app)
     if config.report_enabled:
         schedule_weekly_report(desk, config).start()

@@ -82,6 +82,11 @@ keyword rules, and so does any API failure. Access and change requests get an ac
 `change-request`) and `category-<name>`. Escalated tickets also get `escalated`. This makes JQL filters and Jira
 automation rules easy, for example `labels = escalated AND statusCategory != Done`.
 
+**Reporter.** When the bot's Jira account is allowed to set the reporter, it looks up the requester's Slack email and
+makes the matching Jira user the reporter, so the ticket shows up under *Reported by me*. It only accepts one exact,
+visible email match, never a partial one. Otherwise the bot's account stays the reporter, and the description always
+names who asked.
+
 **Greetings and split posts.** People rarely put a whole problem in one message:
 
 - A post with no details yet, like "Hi team", "quick question" or "I have a problem", gets a reply asking what's
@@ -135,7 +140,6 @@ Slack event and button payloads through Bolt's router to check the wiring. GitHu
 
 - **Jira to Slack updates:** post in the thread when an agent changes status or comments. This needs a Jira webhook,
   or an automation rule that calls a small HTTP endpoint, or polling with JQL.
-- **Reporter mapping:** look up the Slack user's email (`users:read.email`) and set them as the Jira reporter.
 - **Knowledge base:** search Confluence or a docs folder and include the matching articles in the AI prompt.
 - **Jira Service Management:** map incident and request types to JSM request types and SLAs.
 - **Another AI provider:** everything model-specific is in `assistant.py`.

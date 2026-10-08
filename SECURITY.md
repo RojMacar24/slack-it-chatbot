@@ -18,6 +18,7 @@ This is a lab project. Review it before pointing it at a production Slack worksp
 | Text of posts and thread replies in the IT channel | Jira (description and comments) | The ticket record |
 | The same text | OpenAI, only if `OPENAI_API_KEY` is set | Triage and troubleshooting replies |
 | Slack display names | Jira | Shows who reported or replied |
+| A requester's Slack email | Jira's user search, only if the bot may set the reporter | Find their Jira account to make them the reporter. Not stored or logged |
 | Slack user and channel IDs, message timestamps, error details | Logs | Debugging. Message text isn't logged |
 
 The bot has no database. Before text is sent to Jira or OpenAI, it masks anything that looks like a secret:
@@ -46,6 +47,7 @@ The manifest requests only what the bot uses:
 | `chat:write` | Post ticket messages, replies and private notes |
 | `app_mentions:read` | Respond to `@IT Help Desk report` |
 | `users:read` | Show names instead of user IDs in Jira |
+| `users:read.email` | Match the requester to their Jira account, to make them the reporter |
 
 `usergroups:read` isn't in the manifest. Add it only if `IT_STAFF` lists a user group.
 
@@ -89,7 +91,9 @@ What the bot doesn't protect against, or only partly:
 - **IT staff are who `IT_STAFF` says they are.** Without it, any reply from someone other than the requester stops
   the AI. That's a nuisance, not a security risk, since the AI only ever helps the requester.
 - **Changes made in Jira don't reach Slack** (#6). Closing a ticket in Jira doesn't update its Slack thread.
-- **Every ticket is reported by the bot's Jira account** (#9). The requester's name is in the description.
+- **The reporter is often the bot's Jira account.** Making the requester the reporter needs the *Modify Reporter*
+  permission and a visible, exactly matching email, which Jira Cloud usually hides. The bot never accepts a partial
+  or ambiguous match, because the wrong reporter would get the ticket's notifications.
 - **Jira and OpenAI keep what they're sent** under their own retention policies. Data already sent can't be
   recalled by the bot.
 - **The Jira token can do whatever its account can.** Use a dedicated Jira account that's a member of the IT space
