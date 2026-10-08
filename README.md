@@ -25,6 +25,11 @@ each ticket up to date with the Slack conversation until the problem is solved.*
   Mode). Over 200 automated tests with fake Slack, Jira and OpenAI clients run on Linux and Windows on every pull
   request.
 
+<p align="center">
+  <img src="docs/jira-sync.png" width="560" alt="A ticket thread in Slack: the bot's IT-10 message with troubleshooting steps and its two buttons, then two notes from the bot saying someone moved IT-10 from In Progress to To Do, and back to In Progress, in Jira. The person's name is blurred.">
+</p>
+<p align="center"><em>Status changes made in Jira show up in the ticket's Slack thread within a minute.</em></p>
+
 **Tech:** Python 3.12 · Slack Bolt (Socket Mode, Block Kit) · Jira REST API (Cloud and Data Center) · OpenAI API ·
 APScheduler · pytest · GitHub Actions
 
@@ -115,11 +120,6 @@ person made, such as "Alex Kim moved IT-42 from To Do to In Progress in Jira", i
 bot finds that thread from the link in the ticket description, and checks that the thread really is that ticket's
 before posting. Its own changes are skipped, since it already announced them. When a ticket reaches a Done status,
 its buttons come off, just as if the requester had pressed **That fixed it**.
-
-<p align="center">
-  <img src="docs/jira-sync.png" width="560" alt="A ticket thread in Slack: the bot's IT-10 message with troubleshooting steps and its two buttons, then two notes from the bot saying someone moved IT-10 from In Progress to To Do, and back to In Progress, in Jira. The person's name is blurred.">
-</p>
-<p align="center"><em>Two status changes made in Jira, posted in the ticket's Slack thread within a minute.</em></p>
 
 **No database.** The bot recognises its tickets from its own thread message, which starts with
 "Ticket IT-42 created". The requester is whoever started the thread. Jira is the source of truth for status and
