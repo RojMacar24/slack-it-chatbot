@@ -134,6 +134,37 @@ def test_jira_failure_is_reported_in_the_thread(desk, slack, jira):
     assert "<!subteam^SIT>" in message["text"]
 
 
+def test_rejected_ticket_formatting_falls_back_to_plain_text(desk, slack, jira, ai, caplog):
+    slack.fail_post = lambda post: post.get("blocks") is not None and post["text"].startswith("Ticket ")
+    ts = post(desk, slack, "VPN won't connect")
+
+    plain = last_post(slack)
+    assert plain["thread_ts"] == ts and "blocks" not in plain
+    assert plain["text"].startswith("Ticket IT-1 created") and "*restarting*" in plain["text"]
+    assert "retrying as plain text" in caplog.text
+    assert jira.comments == [("IT-1", "AI assistant replied in Slack:\n{noformat}\nTry **restarting** the VPN client.\n{noformat}")]
+
+    reply(desk, slack, ts, "Still failing")  # the thread is still linked to the ticket
+    assert ("IT-1", "UREQ replied in Slack:\n{noformat}\nStill failing\n{noformat}") in jira.comments
+
+
+def test_ticket_that_cant_be_posted_in_slack_is_flagged_in_jira(desk, slack, jira, ai, caplog):
+    slack.fail_post = lambda post: post["text"].startswith("Ticket ")
+    post(desk, slack, "VPN won't connect")
+
+    assert "Created IT-1 but couldn't tell UREQ in Slack" in caplog.text
+    [(key, note)] = jira.comments
+    assert key == "IT-1" and note.startswith("The bot couldn't post this ticket in Slack")
+    assert "Try **restarting** the VPN client." in note  # the unposted AI suggestion, for IT
+    assert "AI assistant replied in Slack" not in note
+
+    slack.fail_post = None
+    second = post(desk, slack, "It shows error 809")  # the requester's next post joins the ticket and links to it
+    assert len(jira.created) == 1
+    assert next(c for c in slack.calls_to("chat_postMessage") if c["thread_ts"] == second)["text"].startswith(
+        "Added to ticket <https://jira.example/browse/IT-1|IT-1>")
+
+
 def test_ignores_other_channels_bots_edits_and_duplicate_events(desk, slack, jira):
     desk.on_message({"channel": "COTHER", "user": REQUESTER, "text": "hi", "ts": "1.1"})
     desk.on_message({"channel": CHANNEL_ID, "bot_id": "B1", "user": "U9", "text": "hi", "ts": "1.2"})

@@ -41,7 +41,10 @@ class FakeSlack:
         return [kwargs for name, kwargs in self.calls if name == method]
 
     def chat_postMessage(self, **kwargs):
+        """Raises SlackApiError for posts that `fail_post` (if set) says should fail."""
         self.calls.append(("chat_postMessage", kwargs))
+        if getattr(self, "fail_post", None) and self.fail_post(kwargs):
+            raise SlackApiError("invalid_blocks", {"ok": False, "error": "invalid_blocks"})
         ts = self.next_ts()
         if kwargs.get("thread_ts") in self.threads:
             self.threads[kwargs["thread_ts"]].append(
