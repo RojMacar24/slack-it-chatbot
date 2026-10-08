@@ -8,8 +8,15 @@ import logging
 import re
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
+
+# Reads are retried when Jira drops a kept-alive connection (it closes idle ones) or is briefly unavailable.
+# Writes aren't: if the first attempt reached Jira, a retry could create a second ticket or comment.
+_RETRY_READS = Retry(total=3, connect=3, read=2, status=2, backoff_factor=0.5, status_forcelist=(502, 503, 504),
+                     allowed_methods=frozenset({"GET"}), raise_on_status=False)
 
 # How a "Done" transition or resolution is named decides whether it means "fixed" or "abandoned".
 _CANCEL_WORDS = re.compile(r"cancel|won'?t|reject|declin|duplicate|obsolete|abandon", re.IGNORECASE)
@@ -33,7 +40,11 @@ class JiraClient:
         self.base_url = base_url.rstrip("/")
         self.is_cloud = email is not None
         self._timeout = timeout
-        self._session = session or requests.Session()
+        if session is None:
+            session = requests.Session()
+            session.mount("https://", HTTPAdapter(max_retries=_RETRY_READS))
+            session.mount("http://", HTTPAdapter(max_retries=_RETRY_READS))
+        self._session = session
         self._session.headers.update({"Accept": "application/json"})
         if email:
             self._session.auth = (email, api_token)

@@ -1,5 +1,7 @@
 import copy
 import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 import requests
@@ -43,6 +45,51 @@ class FakeSession:
 def client(*responses, email="bot@example.com"):
     session = FakeSession(*responses)
     return JiraClient("https://jira.example/", "token", email=email, session=session), session
+
+
+class DroppingJira(BaseHTTPRequestHandler):
+    """A local stand-in for Jira that hangs up without answering the first `drops` requests, the way Jira closes
+    a kept-alive connection that sat idle, then answers normally."""
+    drops = 1
+    seen = []
+
+    def _handle(self):
+        type(self).seen.append(self.command)
+        if len(type(self).seen) <= type(self).drops:
+            self.close_connection = True
+            return  # no response at all: the client sees "Remote end closed connection without response"
+        body = json.dumps({"key": "IT-1", "fields": {"status": {"name": "To Do"}}}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    do_GET = do_POST = _handle
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def dropping_jira():
+    DroppingJira.seen = []
+    server = ThreadingHTTPServer(("127.0.0.1", 0), DroppingJira)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield JiraClient(f"http://127.0.0.1:{server.server_port}", "token", email="bot@example.com")
+    server.shutdown()
+    server.server_close()
+
+
+def test_reads_are_retried_when_jira_drops_the_connection(dropping_jira):
+    assert dropping_jira.get_issue("IT-1") == {"status": {"name": "To Do"}}
+    assert DroppingJira.seen == ["GET", "GET"]
+
+
+def test_writes_are_not_retried_so_nothing_is_created_twice(dropping_jira):
+    with pytest.raises(JiraError, match="POST /rest/api/2/issue failed"):
+        dropping_jira.create_issue("IT", "Task", "s", "d")
+    assert DroppingJira.seen == ["POST"]
 
 
 def test_cloud_uses_basic_auth_and_data_center_uses_bearer():
